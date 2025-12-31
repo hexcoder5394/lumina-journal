@@ -4,7 +4,7 @@ import {
   Zap, Cpu, Radio, Activity, Clock, LayoutGrid, Save, Wifi, Battery, 
   ShieldCheck, Play, Pause, X, Wind, RotateCw, Minus, Plus,
   CircleDollarSign, ExternalLink, AlertTriangle, ChevronLeft, ChevronRight,
-  Maximize2, Minimize2 // NEW IMPORTS
+  Maximize2, Minimize2 
 } from 'lucide-react';
 import { db, auth } from './firebase'; 
 import { collection, getDocs, setDoc, doc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
@@ -97,7 +97,6 @@ export default function JournalApp() {
       });
     }
 
-    // Keyboard Listener for Zen Mode (Escape to exit)
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && zenMode) {
         setZenMode(false);
@@ -249,6 +248,28 @@ export default function JournalApp() {
     return { level, progress };
   };
 
+  const getActivityHeatmap = () => {
+    const today = new Date();
+    const days = [];
+    const weeksToShow = 20; 
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - (weeksToShow * 7));
+    while (startDate.getDay() !== 0) { startDate.setDate(startDate.getDate() - 1); }
+    let currentDate = new Date(startDate);
+    while (currentDate <= today) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const entry = entries.find(e => e.date === dateStr);
+      let intensity = 0;
+      if (entry) {
+        const words = (entry.wordCount || 0);
+        if (words > 500) intensity = 3; else if (words > 200) intensity = 2; else intensity = 1;
+      }
+      days.push({ date: dateStr, intensity });
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    return days;
+  };
+
   const getCalendarDays = () => {
     const year = time.getFullYear();
     const month = time.getMonth();
@@ -278,9 +299,9 @@ export default function JournalApp() {
   const accentText = accent === 'pink' ? 'text-cyber-pink' : accent === 'yellow' ? 'text-cyber-yellow' : 'text-cyber-cyan';
 
   return (
-    <div className={`h-screen w-full bg-cyber-dark bg-grid-pattern text-gray-300 font-body selection:bg-cyber-pink selection:text-white flex flex-col overflow-hidden ${zenMode ? 'p-0' : ''}`}>
+    <div className={`h-screen w-full bg-cyber-dark bg-grid-pattern text-gray-300 font-body selection:bg-cyber-pink selection:text-white flex flex-col ${zenMode ? 'p-0' : ''}`}>
       
-      {/* Top HUD Bar - Hidden in Zen Mode */}
+      {/* Top HUD Bar */}
       {!zenMode && (
         <div className="h-16 border-b border-white/10 bg-cyber-dark/90 backdrop-blur-md z-50 shadow-2xl shrink-0">
           <div className="w-full px-6 h-full flex justify-between items-center">
@@ -311,10 +332,10 @@ export default function JournalApp() {
         </div>
       )}
 
-      {/* Main Content Area */}
+      {/* Main Content Area - Scrollable on small screens */}
       <div className={`flex-1 w-full overflow-hidden flex flex-col ${zenMode ? 'p-0 bg-cyber-dark' : 'px-6 py-4'}`}>
         
-        {/* Navigation Tabs - Hidden in Zen Mode */}
+        {/* Navigation Tabs */}
         {!zenMode && (
           <div className="grid grid-cols-4 gap-2 mb-4 shrink-0">
             {[
@@ -340,12 +361,13 @@ export default function JournalApp() {
           </div>
         )}
 
-        {/* ================= DASHBOARD VIEW ================= */}
+        {/* ================= DASHBOARD VIEW (Responsive Fixes) ================= */}
         {view === 'dashboard' && !zenMode && (
-          <div className="flex-1 grid grid-cols-1 md:grid-cols-4 grid-rows-[1fr_1.2fr_1fr] gap-4 animate-fadeIn overflow-hidden">
+          // CHANGED: overflow-y-auto enables scrolling if height < content
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-4 animate-fadeIn overflow-y-auto pb-4 custom-scrollbar">
             
-            {/* WIDGET 1: CHRONOMETER & WEATHER */}
-            <div className="md:col-span-2 border border-white/10 bg-cyber-slate/30 p-6 relative overflow-hidden flex flex-col justify-between group">
+            {/* WIDGET 1: CHRONOMETER & WEATHER (Height controlled) */}
+            <div className="md:col-span-2 min-h-[220px] border border-white/10 bg-cyber-slate/30 p-6 relative overflow-hidden flex flex-col justify-between group">
               <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-${accent}-500/10 to-transparent`}></div>
               <div className="flex justify-between items-start relative z-10">
                 <h3 className="text-xs font-mono text-gray-500 flex items-center gap-2"><Clock className="w-3 h-3" /> // TEMPORAL_LOCATOR</h3>
@@ -363,7 +385,7 @@ export default function JournalApp() {
             </div>
 
             {/* WIDGET 2: NEURAL FOCUS */}
-            <div className="md:col-span-2 border border-white/10 bg-cyber-slate/30 p-4 flex items-center justify-around relative">
+            <div className="md:col-span-2 min-h-[220px] border border-white/10 bg-cyber-slate/30 p-4 flex items-center justify-around relative">
               <h3 className="absolute top-4 left-4 text-xs font-mono text-gray-500 flex items-center gap-2"><Radio className="w-3 h-3" /> // NEURAL_FOCUS</h3>
               <div className="relative w-48 h-48 flex items-center justify-center">
                 <svg className="w-full h-full transform -rotate-90">
@@ -382,8 +404,8 @@ export default function JournalApp() {
               </div>
             </div>
 
-            {/* WIDGET 3: HOLO CALENDAR */}
-            <div className="md:col-span-1 border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden h-full">
+            {/* WIDGET 3: HOLO CALENDAR (Responsive Height) */}
+            <div className="md:col-span-1 min-h-[300px] border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden">
                <h3 className="text-xs font-mono text-gray-500 mb-4 flex items-center gap-2 shrink-0"><CalIcon className="w-3 h-3" /> // MONTH_VISUALIZER</h3>
               <div className="flex-1 grid grid-cols-7 gap-1 text-center content-start">
                 {['S','M','T','W','T','F','S'].map(d => <span key={d} className="text-[10px] text-gray-600 font-bold">{d}</span>)}
@@ -396,8 +418,8 @@ export default function JournalApp() {
               </div>
             </div>
 
-            {/* WIDGET 4: PROTOCOLS */}
-            <div className="md:col-span-1 border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden h-full">
+            {/* WIDGET 4: PROTOCOLS (Responsive Height) */}
+            <div className="md:col-span-1 min-h-[300px] border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden">
               <div className="flex justify-between items-center mb-4 shrink-0"><h3 className="text-xs font-mono text-gray-500 flex items-center gap-2"><ShieldCheck className="w-3 h-3" /> // PROTOCOLS</h3><span className="text-[10px] font-mono text-gray-600">{habits.filter(h => h.completed).length}/{habits.length}</span></div>
               <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 flex flex-col gap-2">
                 {habits.map(habit => (
@@ -410,8 +432,8 @@ export default function JournalApp() {
               <div className="mt-4 shrink-0"><input type="text" value={newHabit} onChange={(e) => setNewHabit(e.target.value)} onKeyPress={addHabit} placeholder="+ NEW_PROTOCOL" className="w-full bg-black/40 border border-white/10 text-xs font-mono p-3 text-cyber-cyan focus:outline-none focus:border-white/30 uppercase" /></div>
             </div>
 
-            {/* WIDGET 5: RESOURCE MONITOR */}
-            <div className="md:col-span-2 border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden h-full">
+            {/* WIDGET 5: RESOURCE MONITOR (Responsive Height) */}
+            <div className="md:col-span-2 min-h-[250px] border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden">
               <div className="flex justify-between items-start mb-4 shrink-0">
                 <div className="flex items-center gap-4">
                    <h3 className="text-xs font-mono text-gray-500 flex items-center gap-2"><CircleDollarSign className="w-3 h-3" /> // CREDITS_ALLOCATION</h3>
@@ -432,8 +454,8 @@ export default function JournalApp() {
               )}
             </div>
 
-            {/* WIDGET 6: NET-MEMO */}
-            <div className="md:col-span-4 border border-white/10 bg-cyber-slate/30 p-6 relative h-full flex flex-col">
+            {/* WIDGET 6: NET-MEMO (Responsive Height) */}
+            <div className="md:col-span-4 min-h-[200px] border border-white/10 bg-cyber-slate/30 p-6 relative flex flex-col">
               <h3 className="text-xs font-mono text-gray-500 mb-2 flex items-center gap-2 shrink-0"><Save className="w-3 h-3" /> // PERSONAL_MEMORANDA</h3>
               <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="INITIATE DATA ENTRY..." className="flex-1 w-full bg-transparent text-cyber-cyan font-mono text-sm focus:outline-none resize-none placeholder-gray-700 p-2 border-l border-white/5 focus:border-cyber-cyan/50 transition-colors" />
               <div className="absolute bottom-4 right-4 text-[10px] text-gray-600 uppercase">SYSTEM_AUTO_SAVE_ACTIVE</div>
@@ -512,6 +534,38 @@ export default function JournalApp() {
                   <div className="border border-white/10 bg-cyber-slate p-6 flex flex-col items-center justify-center gap-2"><span className={`text-4xl font-display font-bold text-white`}>{getStats().words}</span><span className="text-xs font-mono text-gray-500 tracking-widest uppercase">Word Count</span></div>
                   <div className="border border-white/10 bg-cyber-slate p-6 flex flex-col items-center justify-center gap-2"><span className="text-4xl font-display font-bold text-cyber-yellow">{getStats().favs}</span><span className="text-xs font-mono text-gray-500 tracking-widest uppercase">Starred</span></div>
                   
+                  {/* Activity Heatmap Widget */}
+                  <div className="md:col-span-3 border border-white/10 bg-cyber-slate p-6 flex flex-col gap-4">
+                    <h3 className="text-xs font-mono text-gray-500 flex items-center gap-2">
+                      <Activity className="w-3 h-3" /> // PERSISTENCE_LOG (ACTIVITY_HEATMAP)
+                    </h3>
+                    
+                    <div className="flex flex-wrap gap-1">
+                      {getActivityHeatmap().map((day, i) => (
+                        <div 
+                          key={i}
+                          title={`${day.date}: ${day.intensity === 0 ? 'No Data' : 'Log Entry Found'}`}
+                          className={`
+                            w-3 h-3 rounded-[1px] transition-all duration-300
+                            ${day.intensity === 0 ? 'bg-white/5' : ''}
+                            ${day.intensity === 1 ? `bg-${accent}-500/30` : ''}
+                            ${day.intensity === 2 ? `bg-${accent}-500/60` : ''}
+                            ${day.intensity === 3 ? `bg-${accent}-500 shadow-[0_0_5px_currentColor]` : ''}
+                          `}
+                        ></div>
+                      ))}
+                    </div>
+                    
+                    <div className="flex justify-end items-center gap-2 text-[10px] font-mono text-gray-600">
+                      <span>LESS</span>
+                      <div className="w-3 h-3 bg-white/5"></div>
+                      <div className={`w-3 h-3 bg-${accent}-500/30`}></div>
+                      <div className={`w-3 h-3 bg-${accent}-500/60`}></div>
+                      <div className={`w-3 h-3 bg-${accent}-500`}></div>
+                      <span>MORE</span>
+                    </div>
+                  </div>
+
                   <div className="md:col-span-3 border border-white/10 bg-cyber-slate/50 p-8 flex flex-col items-center justify-center gap-4">
                       <div className="w-32 h-32 rounded-full border-4 border-white/10 flex items-center justify-center relative">
                         <span className={`text-6xl font-display font-bold ${accentText}`}>{getLevel().level}</span>
