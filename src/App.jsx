@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   PenLine, Calendar as CalIcon, Trash2, Star, LogOut, 
   Zap, Cpu, Radio, Activity, Clock, LayoutGrid, Save, Wifi, Battery, 
@@ -10,6 +10,17 @@ import { db, auth } from './firebase';
 import { collection, getDocs, setDoc, doc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import Login from './Login';
+
+// Helper for debouncing (prevents too many DB writes)
+const debounce = (func, delay) => {
+  let timeoutId;
+  return (...args) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      func(...args);
+    }, delay);
+  };
+};
 
 export default function JournalApp() {
   const [user, setUser] = useState(null);
@@ -24,13 +35,10 @@ export default function JournalApp() {
   const [editingId, setEditingId] = useState(null);
   const [view, setView] = useState('dashboard'); 
   const [accent, setAccent] = useState('cyan'); 
-  
-  // --- ZEN MODE STATE ---
   const [zenMode, setZenMode] = useState(false);
 
   // --- WIDGET STATES ---
   const [time, setTime] = useState(new Date());
-  const [memo, setMemo] = useState(localStorage.getItem('lumina_memo') || '');
   
   // Weather
   const [weather, setWeather] = useState(null);
@@ -41,22 +49,15 @@ export default function JournalApp() {
   const [pomoActive, setPomoActive] = useState(false);
   const [totalPomoTime, setTotalPomoTime] = useState(25 * 60); 
   
-  // Habits
+  // --- CLOUD SYNCED WIDGETS (MEMO & HABITS) ---
+  const [memo, setMemo] = useState('');
   const [newHabit, setNewHabit] = useState('');
-  const [habits, setHabits] = useState(() => {
-    const saved = localStorage.getItem('lumina_habits');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.date === new Date().toISOString().split('T')[0]) {
-        return parsed.items;
-      }
-    }
-    return [
-      { id: 1, label: 'HYDRATION', completed: false },
-      { id: 2, label: 'READING_DATA', completed: false },
-      { id: 3, label: 'EXERCISE', completed: false }
-    ];
-  });
+  const [habits, setHabits] = useState([
+    { id: 1, label: 'HYDRATION', completed: false },
+    { id: 2, label: 'READING_DATA', completed: false },
+    { id: 3, label: 'EXERCISE', completed: false }
+  ]);
+  const [isSavingDashboard, setIsSavingDashboard] = useState(false); // Visual indicator
 
   // --- LIVE FINANCE STATE ---
   const [selectedFinMonth, setSelectedFinMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -76,7 +77,10 @@ export default function JournalApp() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingAuth(false);
-      if (currentUser) loadEntries(currentUser.uid);
+      if (currentUser) {
+        loadEntries(currentUser.uid);
+        subscribeToDashboard(currentUser.uid); // Load Memo & Habits from Cloud
+      }
     });
 
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -98,9 +102,7 @@ export default function JournalApp() {
     }
 
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && zenMode) {
-        setZenMode(false);
-      }
+      if (e.key === 'Escape' && zenMode) setZenMode(false);
     };
     window.addEventListener('keydown', handleKeyDown);
 
@@ -110,6 +112,94 @@ export default function JournalApp() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [zenMode]);
+
+  // --- DASHBOARD DATA SYNC (MEMO & HABITS) ---
+  
+  // 1. Subscribe to Cloud Data
+  const subscribeToDashboard = (uid) => {
+    const appId = 'default-503020-app';
+    const dashboardDocRef = doc(db, "artifacts", appId, "users", uid, "lumina_dashboard", "daily");
+
+    return onSnapshot(dashboardDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setMemo(data.memo || '');
+        
+        // Handle Habits (Reset if new day)
+        const today = new Date().toISOString().split('T')[0];
+        if (data.date !== today) {
+          // It's a new day! Reset habits to uncompleted
+          const resetHabits = (data.habits || []).map(h => ({ ...h, completed: false }));
+          setHabits(resetHabits);
+          // Update DB with reset habits immediately
+          saveDashboardToCloud(uid, data.memo, resetHabits); 
+        } else {
+          setHabits(data.habits || []);
+        }
+      }
+    });
+  };
+
+  // 2. Save Function (Updates Firestore)
+  const saveDashboardToCloud = async (uid, currentMemo, currentHabits) => {
+    if (!uid) return;
+    setIsSavingDashboard(true);
+    const appId = 'default-503020-app';
+    const dashboardDocRef = doc(db, "artifacts", appId, "users", uid, "lumina_dashboard", "daily");
+    
+    try {
+      await setDoc(dashboardDocRef, {
+        memo: currentMemo,
+        habits: currentHabits,
+        date: new Date().toISOString().split('T')[0], // Store date to check for daily reset
+        lastUpdated: new Date().toISOString()
+      }, { merge: true });
+    } catch (e) {
+      console.error("Dashboard save failed", e);
+    } finally {
+      setTimeout(() => setIsSavingDashboard(false), 500);
+    }
+  };
+
+  // 3. Debounced Save for Memo (Prevents spamming DB while typing)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const debouncedSaveMemo = useCallback(
+    debounce((uid, txt, currentHabits) => {
+      saveDashboardToCloud(uid, txt, currentHabits);
+    }, 1500),
+    []
+  );
+
+  const handleMemoChange = (e) => {
+    const txt = e.target.value;
+    setMemo(txt); // Update UI immediately
+    if(user) debouncedSaveMemo(user.uid, txt, habits); // Sync later
+  };
+
+  // 4. Immediate Save for Habits (Clicks are rare, so save instantly)
+  const updateHabits = (newHabits) => {
+    setHabits(newHabits); // Update UI
+    if(user) saveDashboardToCloud(user.uid, memo, newHabits); // Sync immediate
+  };
+
+  // --- HABIT ACTIONS ---
+  const addHabit = (e) => {
+    if (e.key === 'Enter' && newHabit.trim()) {
+      const updated = [...habits, { id: Date.now(), label: newHabit.toUpperCase(), completed: false }];
+      updateHabits(updated);
+      setNewHabit('');
+    }
+  };
+
+  const deleteHabit = (id) => {
+    const updated = habits.filter(h => h.id !== id);
+    updateHabits(updated);
+  };
+
+  const toggleHabit = (id) => {
+    const updated = habits.map(h => h.id === id ? { ...h, completed: !h.completed } : h);
+    updateHabits(updated);
+  };
 
   // --- FINANCE DATA LISTENER ---
   useEffect(() => {
@@ -123,16 +213,11 @@ export default function JournalApp() {
     const unsubDoc = onSnapshot(budgetDocRef, (docSnap) => {
       const data = docSnap.data();
       const income = data?.income || 0;
-      
       const unsubItems = onSnapshot(itemsColRef, (itemsSnap) => {
         let totalPlanned = 0;
         itemsSnap.forEach(item => totalPlanned += (item.data().amount || 0));
         setFinanceData({
-          income: income,
-          planned: totalPlanned,
-          remaining: income - totalPlanned,
-          currency: '$', 
-          loaded: true
+          income: income, planned: totalPlanned, remaining: income - totalPlanned, currency: '$', loaded: true
         });
       });
       return () => unsubItems();
@@ -140,7 +225,6 @@ export default function JournalApp() {
       console.error("Finance Sync Error:", error);
       setFinanceData(prev => ({ ...prev, loaded: true, error: true }));
     });
-
     return () => unsubDoc();
   }, [user, selectedFinMonth]);
 
@@ -156,25 +240,7 @@ export default function JournalApp() {
     return () => clearInterval(interval);
   }, [pomoActive, pomoTime]);
 
-  useEffect(() => { localStorage.setItem('lumina_memo', memo); }, [memo]);
-  useEffect(() => {
-    localStorage.setItem('lumina_habits', JSON.stringify({
-      date: new Date().toISOString().split('T')[0],
-      items: habits
-    }));
-  }, [habits]);
-
   // --- ACTIONS ---
-  const addHabit = (e) => {
-    if (e.key === 'Enter' && newHabit.trim()) {
-      setHabits([...habits, { id: Date.now(), label: newHabit.toUpperCase(), completed: false }]);
-      setNewHabit('');
-    }
-  };
-
-  const deleteHabit = (id) => setHabits(habits.filter(h => h.id !== id));
-  const toggleHabit = (id) => setHabits(habits.map(h => h.id === id ? { ...h, completed: !h.completed } : h));
-
   const adjustPomoTime = (minutes) => {
     setPomoActive(false); 
     const currentMins = Math.floor(pomoTime / 60);
@@ -332,7 +398,7 @@ export default function JournalApp() {
         </div>
       )}
 
-      {/* Main Content Area - Scrollable on small screens */}
+      {/* Main Content Area */}
       <div className={`flex-1 w-full overflow-hidden flex flex-col ${zenMode ? 'p-0 bg-cyber-dark' : 'px-6 py-4'}`}>
         
         {/* Navigation Tabs */}
@@ -361,12 +427,11 @@ export default function JournalApp() {
           </div>
         )}
 
-        {/* ================= DASHBOARD VIEW (Responsive Fixes) ================= */}
+        {/* ================= DASHBOARD VIEW ================= */}
         {view === 'dashboard' && !zenMode && (
-          // CHANGED: overflow-y-auto enables scrolling if height < content
           <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-4 animate-fadeIn overflow-y-auto pb-4 custom-scrollbar">
             
-            {/* WIDGET 1: CHRONOMETER & WEATHER (Height controlled) */}
+            {/* WIDGET 1: CHRONOMETER & WEATHER */}
             <div className="md:col-span-2 min-h-[220px] border border-white/10 bg-cyber-slate/30 p-6 relative overflow-hidden flex flex-col justify-between group">
               <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-${accent}-500/10 to-transparent`}></div>
               <div className="flex justify-between items-start relative z-10">
@@ -404,7 +469,7 @@ export default function JournalApp() {
               </div>
             </div>
 
-            {/* WIDGET 3: HOLO CALENDAR (Responsive Height) */}
+            {/* WIDGET 3: HOLO CALENDAR */}
             <div className="md:col-span-1 min-h-[300px] border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden">
                <h3 className="text-xs font-mono text-gray-500 mb-4 flex items-center gap-2 shrink-0"><CalIcon className="w-3 h-3" /> // MONTH_VISUALIZER</h3>
               <div className="flex-1 grid grid-cols-7 gap-1 text-center content-start">
@@ -418,7 +483,7 @@ export default function JournalApp() {
               </div>
             </div>
 
-            {/* WIDGET 4: PROTOCOLS (Responsive Height) */}
+            {/* WIDGET 4: PROTOCOLS */}
             <div className="md:col-span-1 min-h-[300px] border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden">
               <div className="flex justify-between items-center mb-4 shrink-0"><h3 className="text-xs font-mono text-gray-500 flex items-center gap-2"><ShieldCheck className="w-3 h-3" /> // PROTOCOLS</h3><span className="text-[10px] font-mono text-gray-600">{habits.filter(h => h.completed).length}/{habits.length}</span></div>
               <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 flex flex-col gap-2">
@@ -432,7 +497,7 @@ export default function JournalApp() {
               <div className="mt-4 shrink-0"><input type="text" value={newHabit} onChange={(e) => setNewHabit(e.target.value)} onKeyPress={addHabit} placeholder="+ NEW_PROTOCOL" className="w-full bg-black/40 border border-white/10 text-xs font-mono p-3 text-cyber-cyan focus:outline-none focus:border-white/30 uppercase" /></div>
             </div>
 
-            {/* WIDGET 5: RESOURCE MONITOR (Responsive Height) */}
+            {/* WIDGET 5: RESOURCE MONITOR */}
             <div className="md:col-span-2 min-h-[250px] border border-white/10 bg-cyber-slate/30 p-6 flex flex-col relative overflow-hidden">
               <div className="flex justify-between items-start mb-4 shrink-0">
                 <div className="flex items-center gap-4">
@@ -454,10 +519,13 @@ export default function JournalApp() {
               )}
             </div>
 
-            {/* WIDGET 6: NET-MEMO (Responsive Height) */}
+            {/* WIDGET 6: NET-MEMO */}
             <div className="md:col-span-4 min-h-[200px] border border-white/10 bg-cyber-slate/30 p-6 relative flex flex-col">
-              <h3 className="text-xs font-mono text-gray-500 mb-2 flex items-center gap-2 shrink-0"><Save className="w-3 h-3" /> // PERSONAL_MEMORANDA</h3>
-              <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="INITIATE DATA ENTRY..." className="flex-1 w-full bg-transparent text-cyber-cyan font-mono text-sm focus:outline-none resize-none placeholder-gray-700 p-2 border-l border-white/5 focus:border-cyber-cyan/50 transition-colors" />
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-xs font-mono text-gray-500 flex items-center gap-2"><Save className="w-3 h-3" /> // PERSONAL_MEMORANDA</h3>
+                {isSavingDashboard && <span className="text-[10px] text-green-500 animate-pulse">UPLOADING...</span>}
+              </div>
+              <textarea value={memo} onChange={handleMemoChange} placeholder="INITIATE DATA ENTRY..." className="flex-1 w-full bg-transparent text-cyber-cyan font-mono text-sm focus:outline-none resize-none placeholder-gray-700 p-2 border-l border-white/5 focus:border-cyber-cyan/50 transition-colors" />
               <div className="absolute bottom-4 right-4 text-[10px] text-gray-600 uppercase">SYSTEM_AUTO_SAVE_ACTIVE</div>
             </div>
           </div>
@@ -466,43 +534,26 @@ export default function JournalApp() {
         {/* ================= WRITE VIEW (Zen Mode Compatible) ================= */}
         {(view === 'write' || zenMode) && (
           <div className={`flex-1 border border-white/10 bg-cyber-slate/50 animate-fadeIn relative flex flex-col overflow-hidden ${zenMode ? 'fixed inset-0 z-[100] bg-cyber-dark p-8 md:p-20 border-none' : 'p-6 md:p-8'}`}>
-            {/* Zen Decor (Only in normal write mode) */}
             {!zenMode && (
               <>
                 <div className={`absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 ${accentColor.split(' ')[0]}`}></div>
                 <div className={`absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 ${accentColor.split(' ')[0]}`}></div>
               </>
             )}
-            
-            {/* Zen Toggle Button */}
             <div className={`absolute top-6 right-6 z-50`}>
-               <button 
-                 onClick={() => setZenMode(!zenMode)} 
-                 className={`p-2 rounded-full border border-white/20 hover:bg-white/10 transition-all text-gray-400 hover:text-white`}
-                 title={zenMode ? "Exit Focus Chamber (Esc)" : "Enter Focus Chamber"}
-               >
+               <button onClick={() => setZenMode(!zenMode)} className={`p-2 rounded-full border border-white/20 hover:bg-white/10 transition-all text-gray-400 hover:text-white`} title={zenMode ? "Exit Focus Chamber (Esc)" : "Enter Focus Chamber"}>
                  {zenMode ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
                </button>
             </div>
-
             <div className={`flex flex-wrap justify-between items-end gap-4 border-b border-white/10 pb-6 shrink-0 ${zenMode ? 'max-w-4xl mx-auto w-full' : ''}`}>
               <input type="text" value={currentEntry.title} onChange={(e) => setCurrentEntry({...currentEntry, title: e.target.value})} placeholder="ENTRY_TITLE_Required" className="bg-transparent text-3xl md:text-4xl font-display font-bold text-white placeholder-gray-700 focus:outline-none w-full md:w-auto flex-1 uppercase" />
               <div className="flex gap-2">
                   {moods.map(m => ( <button key={m.id} onClick={() => setCurrentEntry({...currentEntry, mood: m.id})} className={`p-2 border transition-all ${currentEntry.mood === m.id ? `${m.color} border-current shadow-[0_0_10px_currentColor]` : 'border-gray-700 text-gray-600 hover:text-gray-400'}`}><m.icon className="w-5 h-5" /></button> ))}
               </div>
             </div>
-            
-            <textarea 
-              value={currentEntry.content} 
-              onChange={(e) => setCurrentEntry({...currentEntry, content: e.target.value})} 
-              placeholder="INITIATE LOG SEQUENCE..." 
-              className={`flex-1 w-full bg-transparent text-lg leading-relaxed p-4 focus:outline-none resize-none font-mono mt-6 mb-4 ${zenMode ? 'max-w-4xl mx-auto text-xl text-gray-300' : 'bg-black/20 border-l-2 border-transparent focus:border-l-cyber-cyan transition-all text-gray-200'}`}
-            />
-            
+            <textarea value={currentEntry.content} onChange={(e) => setCurrentEntry({...currentEntry, content: e.target.value})} placeholder="INITIATE LOG SEQUENCE..." className={`flex-1 w-full bg-transparent text-lg leading-relaxed p-4 focus:outline-none resize-none font-mono mt-6 mb-4 ${zenMode ? 'max-w-4xl mx-auto text-xl text-gray-300' : 'bg-black/20 border-l-2 border-transparent focus:border-l-cyber-cyan transition-all text-gray-200'}`} />
             <div className={`flex justify-between items-center pt-4 border-t border-white/10 shrink-0 ${zenMode ? 'max-w-4xl mx-auto w-full' : ''}`}>
-              <div className="flex gap-2 text-xs font-mono text-gray-500">
-                {currentEntry.content.split(/\s+/).length} WORDS // {new Date().toLocaleDateString()}
-              </div>
+              <div className="flex gap-2 text-xs font-mono text-gray-500">{currentEntry.content.split(/\s+/).length} WORDS // {new Date().toLocaleDateString()}</div>
               <button onClick={saveEntry} disabled={!currentEntry.title} className={`px-8 py-3 font-display font-bold tracking-widest uppercase transition-all ${!currentEntry.title ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : `${accentBg} text-cyber-dark hover:shadow-[0_0_20px_rgba(0,240,255,0.4)]`}`}>{editingId ? 'OVERWRITE' : 'SAVE_DATA'}</button>
             </div>
           </div>
@@ -534,36 +585,14 @@ export default function JournalApp() {
                   <div className="border border-white/10 bg-cyber-slate p-6 flex flex-col items-center justify-center gap-2"><span className={`text-4xl font-display font-bold text-white`}>{getStats().words}</span><span className="text-xs font-mono text-gray-500 tracking-widest uppercase">Word Count</span></div>
                   <div className="border border-white/10 bg-cyber-slate p-6 flex flex-col items-center justify-center gap-2"><span className="text-4xl font-display font-bold text-cyber-yellow">{getStats().favs}</span><span className="text-xs font-mono text-gray-500 tracking-widest uppercase">Starred</span></div>
                   
-                  {/* Activity Heatmap Widget */}
                   <div className="md:col-span-3 border border-white/10 bg-cyber-slate p-6 flex flex-col gap-4">
-                    <h3 className="text-xs font-mono text-gray-500 flex items-center gap-2">
-                      <Activity className="w-3 h-3" /> // PERSISTENCE_LOG (ACTIVITY_HEATMAP)
-                    </h3>
-                    
+                    <h3 className="text-xs font-mono text-gray-500 flex items-center gap-2"><Activity className="w-3 h-3" /> // PERSISTENCE_LOG (ACTIVITY_HEATMAP)</h3>
                     <div className="flex flex-wrap gap-1">
                       {getActivityHeatmap().map((day, i) => (
-                        <div 
-                          key={i}
-                          title={`${day.date}: ${day.intensity === 0 ? 'No Data' : 'Log Entry Found'}`}
-                          className={`
-                            w-3 h-3 rounded-[1px] transition-all duration-300
-                            ${day.intensity === 0 ? 'bg-white/5' : ''}
-                            ${day.intensity === 1 ? `bg-${accent}-500/30` : ''}
-                            ${day.intensity === 2 ? `bg-${accent}-500/60` : ''}
-                            ${day.intensity === 3 ? `bg-${accent}-500 shadow-[0_0_5px_currentColor]` : ''}
-                          `}
-                        ></div>
+                        <div key={i} title={`${day.date}: ${day.intensity === 0 ? 'No Data' : 'Log Entry Found'}`} className={`w-3 h-3 rounded-[1px] transition-all duration-300 ${day.intensity === 0 ? 'bg-white/5' : ''} ${day.intensity === 1 ? `bg-${accent}-500/30` : ''} ${day.intensity === 2 ? `bg-${accent}-500/60` : ''} ${day.intensity === 3 ? `bg-${accent}-500 shadow-[0_0_5px_currentColor]` : ''}`}></div>
                       ))}
                     </div>
-                    
-                    <div className="flex justify-end items-center gap-2 text-[10px] font-mono text-gray-600">
-                      <span>LESS</span>
-                      <div className="w-3 h-3 bg-white/5"></div>
-                      <div className={`w-3 h-3 bg-${accent}-500/30`}></div>
-                      <div className={`w-3 h-3 bg-${accent}-500/60`}></div>
-                      <div className={`w-3 h-3 bg-${accent}-500`}></div>
-                      <span>MORE</span>
-                    </div>
+                    <div className="flex justify-end items-center gap-2 text-[10px] font-mono text-gray-600"><span>LESS</span><div className="w-3 h-3 bg-white/5"></div><div className={`w-3 h-3 bg-${accent}-500/30`}></div><div className={`w-3 h-3 bg-${accent}-500/60`}></div><div className={`w-3 h-3 bg-${accent}-500`}></div><span>MORE</span></div>
                   </div>
 
                   <div className="md:col-span-3 border border-white/10 bg-cyber-slate/50 p-8 flex flex-col items-center justify-center gap-4">
@@ -572,9 +601,7 @@ export default function JournalApp() {
                         <div className={`absolute inset-0 rounded-full border-4 ${accentColor.split(' ')[0]} border-t-transparent animate-spin`} style={{animationDuration: '3s'}}></div>
                       </div>
                       <h2 className="text-xl font-display uppercase tracking-widest text-white">Security Clearance Level {getLevel().level}</h2>
-                      <div className="w-full max-w-md h-2 bg-gray-800 rounded-full overflow-hidden">
-                        <div className={`h-full ${accentBg}`} style={{ width: `${getLevel().progress}%` }}></div>
-                      </div>
+                      <div className="w-full max-w-md h-2 bg-gray-800 rounded-full overflow-hidden"><div className={`h-full ${accentBg}`} style={{ width: `${getLevel().progress}%` }}></div></div>
                       <div className="flex gap-4 mt-6">
                         <button onClick={() => setAccent('cyan')} className="w-6 h-6 bg-cyber-cyan hover:scale-125 transition-transform"></button>
                         <button onClick={() => setAccent('pink')} className="w-6 h-6 bg-cyber-pink hover:scale-125 transition-transform"></button>
