@@ -1,0 +1,7 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { PenLine, Calendar, Search, Trash2, BookOpen, Tag, Smile, Image, Star, TrendingUp, Settings, Palette, Moon, Sun, Filter, Grid, List, BarChart3, Heart, Meh, Frown, Angry, Laugh, LogOut } from 'lucide-react';
+import { db, auth } from './firebase'; 
+import { collection, getDocs, setDoc, doc, deleteDoc, query, where } from 'firebase/firestore';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import Login from './Login'; // Import the new component
+import { onAuthStateChanged, signOut } from 'firebase/auth';
