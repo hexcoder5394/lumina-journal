@@ -7,22 +7,23 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        'display': ['"Orbitron"', 'sans-serif'], // For Headings
-        'body': ['"Exo 2"', 'sans-serif'],       // For Text
+        'sans': ['"Inter"', 'sans-serif'], // Clean modern font
+        'mono': ['"JetBrains Mono"', 'monospace'], // For code/numbers
       },
       colors: {
-        cyber: {
-          dark: '#050511',
-          slate: '#0f172a',
-          cyan: '#00f0ff',
-          pink: '#ff003c',
-          yellow: '#fcee0a',
-          purple: '#bc13fe'
+        // The new "EduApp" palette
+        pro: {
+          bg: '#0B0E14',       // Deepest background
+          card: '#151B28',     // Card background
+          border: '#2A3441',   // Subtle borders
+          primary: '#6366f1',  // Indigo/Purple accent
+          secondary: '#3b82f6',// Blue accent
+          text: '#94a3b8',     // Muted text
+          white: '#f8fafc'     // Bright text
         }
       },
-      boxShadow: {
-        'neon-cyan': '0 0 5px #00f0ff, 0 0 20px rgba(0, 240, 255, 0.3)',
-        'neon-pink': '0 0 5px #ff003c, 0 0 20px rgba(255, 0, 60, 0.3)',
+      backgroundImage: {
+        'gradient-primary': 'linear-gradient(135deg, #6366f1 0%, #3b82f6 100%)', // The purple card gradient
       }
     },
   },
