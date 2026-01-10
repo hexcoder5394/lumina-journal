@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  LayoutDashboard, PenTool, BookOpen, BarChart2, // Sidebar Icons
-  Clock, Cloud, Zap, Play, Pause, RotateCw, // Widget Icons
+  LayoutDashboard, PenTool, BookOpen, BarChart2, 
+  Clock, Cloud, Zap, Play, Pause, RotateCw, 
   CheckCircle, Plus, X, Save, DollarSign, Calendar as CalendarIcon,
   ChevronLeft, ChevronRight, Maximize2, Minimize2, LogOut,
   Moon, Sun, Edit3, Menu, GraduationCap, ExternalLink, Sunrise,
   Linkedin, Github, TrendingUp, Mail, Link, Bell, CalendarCheck, Trash2,
-  Lock, Unlock, Shield, KeyRound, Settings as SettingsIcon // SECURITY ICONS
+  Lock, Unlock, Shield, KeyRound, Settings as SettingsIcon 
 } from 'lucide-react';
 import { db, auth } from './firebase'; 
 import { collection, getDocs, setDoc, doc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
@@ -38,12 +38,12 @@ export default function JournalApp() {
   const [editingId, setEditingId] = useState(null);
   
   // --- SECURITY STATE ---
-  const [securityPin, setSecurityPin] = useState(null); // The actual PIN from DB
-  const [sessionExpiry, setSessionExpiry] = useState(0); // Timestamp when unlock expires
-  const [isPinPromptOpen, setIsPinPromptOpen] = useState(false); // Show Lock Screen
-  const [pinInput, setPinInput] = useState(''); // Current PIN typing
-  const [targetView, setTargetView] = useState(null); // Where user wanted to go
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Settings Modal
+  const [securityPin, setSecurityPin] = useState(null); 
+  const [sessionExpiry, setSessionExpiry] = useState(0); 
+  const [isPinPromptOpen, setIsPinPromptOpen] = useState(false); 
+  const [pinInput, setPinInput] = useState(''); 
+  const [targetView, setTargetView] = useState(null); 
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false); 
   
   // Settings Mode: 'unlock' | 'setup' | 'verify_current' | 'set_new' | 'verify_remove'
   const [pinMode, setPinMode] = useState('unlock'); 
@@ -80,7 +80,7 @@ export default function JournalApp() {
         loadEntries(u.uid);
         subscribeToDashboard(u.uid);
         loadEvents(u.uid);
-        loadSecuritySettings(u.uid); // Load PIN
+        loadSecuritySettings(u.uid);
       }
     });
 
@@ -99,7 +99,7 @@ export default function JournalApp() {
     return () => { unsubscribe(); clearInterval(timer); };
   }, []);
 
-  // --- SECURITY LOGIC (FIXED) ---
+  // --- SECURITY LOGIC ---
   const loadSecuritySettings = async (uid) => {
     const docRef = doc(db, "artifacts", "default-503020-app", "users", uid, "lumina_dashboard", "security");
     onSnapshot(docRef, (docSnap) => {
@@ -114,26 +114,24 @@ export default function JournalApp() {
   const handleNavigation = (destination) => {
     const protectedViews = ['write', 'entries'];
     
-    // If view is protected and PIN is set
     if (protectedViews.includes(destination) && securityPin) {
-      // Check if session is still valid (30 mins)
       if (Date.now() < sessionExpiry) {
-        setView(destination); // Session valid, go ahead
+        setView(destination);
       } else {
         setTargetView(destination);
         setPinMode('unlock');
         setPinInput('');
-        setIsPinPromptOpen(true); // Show Lock Screen
+        setIsPinPromptOpen(true);
       }
     } else {
-      setView(destination); // No PIN or public view
+      setView(destination);
     }
   };
 
-  const handlePinSubmit = async () => {
+  const handlePinSubmit = useCallback(async () => {
     if (pinMode === 'unlock') {
       if (pinInput === securityPin) {
-        setSessionExpiry(Date.now() + 30 * 60 * 1000); // Set 30 min session
+        setSessionExpiry(Date.now() + 30 * 60 * 1000);
         setIsPinPromptOpen(false);
         if (targetView) setView(targetView);
       } else {
@@ -164,7 +162,6 @@ export default function JournalApp() {
         alert("PIN Updated Successfully.");
       }
     }
-    // NEW: Verification for Deletion
     else if (pinMode === 'verify_remove') {
       if (pinInput === securityPin) {
         const docRef = doc(db, "artifacts", "default-503020-app", "users", user.uid, "lumina_dashboard", "security");
@@ -177,7 +174,7 @@ export default function JournalApp() {
         setPinInput('');
       }
     }
-  };
+  }, [pinMode, pinInput, securityPin, targetView, user]);
 
   const savePinToCloud = async (newPin) => {
     if (!user) return;
@@ -185,13 +182,44 @@ export default function JournalApp() {
     await setDoc(docRef, { pin: newPin }, { merge: true });
   };
 
-  // REPLACED: New initiate function
   const initiateRemovePin = () => {
     setPinMode('verify_remove');
     setPinInput('');
     setIsPinPromptOpen(true);
     setIsSettingsOpen(false);
   };
+
+  // --- KEYBOARD LISTENER FOR PIN (NEW) ---
+  useEffect(() => {
+    if (!isPinPromptOpen) return;
+
+    const handleKeyDown = (e) => {
+      // Numbers 0-9
+      if (/^[0-9]$/.test(e.key)) {
+        setPinInput(prev => (prev.length < 6 ? prev + e.key : prev));
+      }
+      // Backspace (Delete last char)
+      else if (e.key === 'Backspace') {
+        setPinInput(prev => prev.slice(0, -1));
+      }
+      // Delete (Clear all)
+      else if (e.key === 'Delete') {
+        setPinInput('');
+      }
+      // Enter (Submit)
+      else if (e.key === 'Enter') {
+        handlePinSubmit();
+      }
+      // Escape (Cancel)
+      else if (e.key === 'Escape') {
+         if (pinMode === 'unlock') setIsPinPromptOpen(false);
+         else if (pinMode === 'verify_remove') { setIsPinPromptOpen(false); setIsSettingsOpen(true); }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPinPromptOpen, pinMode, handlePinSubmit]); // Re-binds when modal state changes
 
   // --- TIMER LOGIC ---
   useEffect(() => {
