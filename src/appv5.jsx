@@ -2,11 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, PenTool, BookOpen, BarChart2, // Sidebar Icons
   Clock, Cloud, Zap, Play, Pause, RotateCw, // Widget Icons
-  CheckCircle, Plus, X, Save, DollarSign, Calendar as CalendarIcon,
+  CheckCircle, Plus, X, Save, DollarSign, Calendar,
   ChevronLeft, ChevronRight, Maximize2, Minimize2, LogOut,
   Moon, Sun, Edit3, Menu, GraduationCap, ExternalLink, Sunrise,
-  Linkedin, Github, TrendingUp, Mail, Link, Bell, CalendarCheck, Trash2,
-  Lock, Unlock, Shield, KeyRound, Settings as SettingsIcon // SECURITY ICONS
+  Linkedin, Github, TrendingUp, Mail, Link // NEW ICONS ADDED
 } from 'lucide-react';
 import { db, auth } from './firebase'; 
 import { collection, getDocs, setDoc, doc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
@@ -37,24 +36,6 @@ export default function JournalApp() {
   const [currentEntry, setCurrentEntry] = useState({ title: '', content: '', date: new Date().toISOString().split('T')[0], mood: null });
   const [editingId, setEditingId] = useState(null);
   
-  // --- SECURITY STATE ---
-  const [securityPin, setSecurityPin] = useState(null); // The actual PIN from DB
-  const [sessionExpiry, setSessionExpiry] = useState(0); // Timestamp when unlock expires
-  const [isPinPromptOpen, setIsPinPromptOpen] = useState(false); // Show Lock Screen
-  const [pinInput, setPinInput] = useState(''); // Current PIN typing
-  const [targetView, setTargetView] = useState(null); // Where user wanted to go
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Settings Modal
-  
-  // Settings Mode: 'unlock' | 'setup' | 'verify_current' | 'set_new' | 'verify_remove'
-  const [pinMode, setPinMode] = useState('unlock'); 
-  
-  // --- EVENTS & REMINDERS STATE ---
-  const [events, setEvents] = useState([]);
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [isEventModalOpen, setEventModalOpen] = useState(false);
-  const [newEvent, setNewEvent] = useState({ title: '', time: '' });
-  const [dailyReminder, setDailyReminder] = useState(null);
-
   // --- WIDGET DATA ---
   const [weather, setWeather] = useState(null);
   
@@ -79,8 +60,6 @@ export default function JournalApp() {
       if (u) {
         loadEntries(u.uid);
         subscribeToDashboard(u.uid);
-        loadEvents(u.uid);
-        loadSecuritySettings(u.uid); // Load PIN
       }
     });
 
@@ -98,100 +77,6 @@ export default function JournalApp() {
 
     return () => { unsubscribe(); clearInterval(timer); };
   }, []);
-
-  // --- SECURITY LOGIC (FIXED) ---
-  const loadSecuritySettings = async (uid) => {
-    const docRef = doc(db, "artifacts", "default-503020-app", "users", uid, "lumina_dashboard", "security");
-    onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setSecurityPin(docSnap.data().pin);
-      } else {
-        setSecurityPin(null);
-      }
-    });
-  };
-
-  const handleNavigation = (destination) => {
-    const protectedViews = ['write', 'entries'];
-    
-    // If view is protected and PIN is set
-    if (protectedViews.includes(destination) && securityPin) {
-      // Check if session is still valid (30 mins)
-      if (Date.now() < sessionExpiry) {
-        setView(destination); // Session valid, go ahead
-      } else {
-        setTargetView(destination);
-        setPinMode('unlock');
-        setPinInput('');
-        setIsPinPromptOpen(true); // Show Lock Screen
-      }
-    } else {
-      setView(destination); // No PIN or public view
-    }
-  };
-
-  const handlePinSubmit = async () => {
-    if (pinMode === 'unlock') {
-      if (pinInput === securityPin) {
-        setSessionExpiry(Date.now() + 30 * 60 * 1000); // Set 30 min session
-        setIsPinPromptOpen(false);
-        if (targetView) setView(targetView);
-      } else {
-        alert("ACCESS DENIED: Incorrect PIN");
-        setPinInput('');
-      }
-    } 
-    else if (pinMode === 'setup') {
-      if (pinInput.length === 6) {
-        await savePinToCloud(pinInput);
-        setIsPinPromptOpen(false);
-        alert("Security Protocol Engaged. PIN Set.");
-      }
-    }
-    else if (pinMode === 'verify_current') {
-      if (pinInput === securityPin) {
-        setPinMode('set_new');
-        setPinInput('');
-      } else {
-        alert("Incorrect Current PIN");
-        setPinInput('');
-      }
-    }
-    else if (pinMode === 'set_new') {
-      if (pinInput.length === 6) {
-        await savePinToCloud(pinInput);
-        setIsPinPromptOpen(false);
-        alert("PIN Updated Successfully.");
-      }
-    }
-    // NEW: Verification for Deletion
-    else if (pinMode === 'verify_remove') {
-      if (pinInput === securityPin) {
-        const docRef = doc(db, "artifacts", "default-503020-app", "users", user.uid, "lumina_dashboard", "security");
-        await setDoc(docRef, { pin: null });
-        setSecurityPin(null);
-        setIsPinPromptOpen(false);
-        alert("Security Protocols Disengaged. PIN Removed.");
-      } else {
-        alert("ACCESS DENIED: Incorrect PIN. Cannot remove security.");
-        setPinInput('');
-      }
-    }
-  };
-
-  const savePinToCloud = async (newPin) => {
-    if (!user) return;
-    const docRef = doc(db, "artifacts", "default-503020-app", "users", user.uid, "lumina_dashboard", "security");
-    await setDoc(docRef, { pin: newPin }, { merge: true });
-  };
-
-  // REPLACED: New initiate function
-  const initiateRemovePin = () => {
-    setPinMode('verify_remove');
-    setPinInput('');
-    setIsPinPromptOpen(true);
-    setIsSettingsOpen(false);
-  };
 
   // --- TIMER LOGIC ---
   useEffect(() => {
@@ -304,55 +189,6 @@ export default function JournalApp() {
     if(confirm("Delete entry?")) { await deleteDoc(doc(db, "entries", id)); loadEntries(user.uid); }
   };
 
-  // --- EVENTS SYSTEM ---
-  const loadEvents = async (uid) => {
-    const q = query(collection(db, "calendar_events"), where("userId", "==", uid));
-    const snap = await getDocs(q);
-    const loadedEvents = snap.docs.map(d => ({id: d.id, ...d.data()}));
-    setEvents(loadedEvents);
-    
-    // Check for Today's Reminders
-    const today = new Date().toISOString().split('T')[0];
-    const todayEvents = loadedEvents.filter(e => e.date === today);
-    if (todayEvents.length > 0) {
-      setDailyReminder(`${todayEvents.length} event${todayEvents.length > 1 ? 's' : ''} scheduled for today.`);
-    }
-  };
-
-  const handleDateClick = (day) => {
-    if (!day) return;
-    const currentMonth = new Date().toISOString().slice(0, 7);
-    const dateStr = `${currentMonth}-${day.toString().padStart(2, '0')}`;
-    setSelectedDate(dateStr);
-    setEventModalOpen(true);
-  };
-
-  const saveEvent = async () => {
-    if (!newEvent.title || !user || !selectedDate) return;
-    const id = Date.now().toString();
-    const eventData = { 
-      id, 
-      userId: user.uid, 
-      date: selectedDate, 
-      title: newEvent.title, 
-      time: newEvent.time 
-    };
-    
-    await setDoc(doc(db, "calendar_events", id), eventData);
-    setEvents([...events, eventData]); 
-    setNewEvent({ title: '', time: '' });
-    if(selectedDate === new Date().toISOString().split('T')[0]) {
-       setDailyReminder("New event added to today's schedule.");
-    }
-  };
-
-  const deleteEvent = async (id) => {
-    if(confirm("Remove this event?")) {
-      await deleteDoc(doc(db, "calendar_events", id));
-      setEvents(events.filter(e => e.id !== id));
-    }
-  };
-
   // --- ANALYTICS HELPERS ---
   const getStats = () => ({
     total: entries.length,
@@ -424,23 +260,7 @@ export default function JournalApp() {
     return entries.some(e => e.date === checkDate);
   };
 
-  const hasEventOnDay = (day) => {
-    if (!day) return false;
-    const currentMonth = new Date().toISOString().slice(0, 7);
-    const checkDate = `${currentMonth}-${day.toString().padStart(2, '0')}`;
-    return events.some(e => e.date === checkDate);
-  };
-
-  const getUpcomingEvents = () => {
-    const today = new Date().toISOString().split('T')[0];
-    return events
-      .filter(e => e.date >= today)
-      .sort((a, b) => {
-        if (a.date !== b.date) return a.date.localeCompare(b.date);
-        return a.time.localeCompare(b.time);
-      });
-  };
-
+  // --- DYNAMIC GREETING ICON ---
   const getGreetingIcon = () => {
     const hour = time.getHours();
     if (hour >= 5 && hour < 12) {
@@ -502,13 +322,13 @@ export default function JournalApp() {
             <nav className="space-y-2 px-2">
               {[
                 { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-                { id: 'write', icon: PenTool, label: 'Journal' }, // Protected
-                { id: 'entries', icon: BookOpen, label: 'Entries' }, // Protected
+                { id: 'write', icon: PenTool, label: 'Journal' },
+                { id: 'entries', icon: BookOpen, label: 'Entries' },
                 { id: 'stats', icon: BarChart2, label: 'Analytics' }
               ].map(item => (
                 <button 
                   key={item.id}
-                  onClick={() => handleNavigation(item.id)}
+                  onClick={() => setView(item.id)}
                   className={`
                     flex items-center h-12 w-full rounded-xl transition-all duration-200 group relative
                     ${view === item.id 
@@ -516,12 +336,8 @@ export default function JournalApp() {
                       : 'text-gray-500 hover:bg-white/5 hover:text-pro-white'}
                   `}
                 >
-                  <div className="w-16 h-12 flex items-center justify-center shrink-0 relative">
+                  <div className="w-16 h-12 flex items-center justify-center shrink-0">
                     <item.icon className={`w-5 h-5 transition-colors ${view === item.id ? 'text-pro-primary' : 'group-hover:text-pro-white'}`} />
-                    {/* Lock Icon Indicator */}
-                    {securityPin && (item.id === 'write' || item.id === 'entries') && (
-                      <div className="absolute top-2 right-4 w-2 h-2 bg-purple-500 rounded-full"></div>
-                    )}
                   </div>
                   <span className={`font-medium whitespace-nowrap overflow-hidden transition-all duration-300 ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>
                     {item.label}
@@ -531,18 +347,7 @@ export default function JournalApp() {
             </nav>
           </div>
 
-          <div className="border-t border-pro-border pt-6 px-2 space-y-2">
-             {/* Settings Button */}
-             <button onClick={() => setIsSettingsOpen(true)} className="flex items-center h-12 w-full rounded-xl text-gray-500 hover:bg-white/5 hover:text-pro-white transition-colors">
-               <div className="w-16 h-12 flex items-center justify-center shrink-0">
-                 <SettingsIcon className="w-5 h-5" />
-               </div>
-               <span className={`font-medium whitespace-nowrap overflow-hidden transition-all duration-300 ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>
-                 Settings
-               </span>
-             </button>
-
-             {/* Logout Button */}
+          <div className="border-t border-pro-border pt-6 px-2">
              <button onClick={() => signOut(auth)} className="flex items-center h-12 w-full rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors">
                <div className="w-16 h-12 flex items-center justify-center shrink-0">
                  <LogOut className="w-5 h-5" />
@@ -571,16 +376,7 @@ export default function JournalApp() {
                 <p className="text-sm text-gray-500 mt-1">Ready to organize your thoughts?</p>
               </div>
             </div>
-            
-            {/* Notification Area */}
             <div className="flex items-center gap-4">
-               {dailyReminder && (
-                 <div className="hidden md:flex items-center gap-2 px-4 py-1.5 bg-pro-card rounded-full border border-pro-border animate-fadeIn">
-                   <Bell className="w-4 h-4 text-yellow-400 animate-pulse" />
-                   <span className="text-xs font-medium text-gray-300">{dailyReminder}</span>
-                   <button onClick={() => setDailyReminder(null)} className="ml-2 hover:text-white"><X className="w-3 h-3"/></button>
-                 </div>
-               )}
                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-pro-card rounded-lg border border-pro-border">
                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
                  <span className="text-xs font-mono text-gray-400">SYS.ONLINE</span>
@@ -697,7 +493,7 @@ export default function JournalApp() {
               {/* 5. Calendar */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4">
-                  <h4 className="font-semibold text-pro-white flex items-center gap-2"><CalendarIcon className="w-4 h-4 text-pro-secondary"/> Calendar</h4>
+                  <h4 className="font-semibold text-pro-white flex items-center gap-2"><Calendar className="w-4 h-4 text-pro-secondary"/> Calendar</h4>
                 </div>
                 <div className="grid grid-cols-7 gap-1 text-center text-xs mb-2">
                   {['S','M','T','W','T','F','S'].map((d, i) => (<span key={i} className="text-gray-600 font-bold">{d}</span>))}
@@ -706,46 +502,34 @@ export default function JournalApp() {
                   {getCalendarDays().map((day, idx) => {
                     if (!day) return <div key={`empty-${idx}`} className="aspect-square"></div>;
                     const hasData = hasEntryOnDay(day);
-                    const hasEvent = hasEventOnDay(day);
                     const isToday = day === new Date().getDate();
                     return (
-                      <div 
-                        key={day} 
-                        onClick={() => handleDateClick(day)}
-                        className={`
-                          aspect-square flex items-center justify-center text-xs font-medium rounded-full transition-all cursor-pointer relative hover:bg-pro-primary/20
-                          ${isToday ? 'bg-pro-primary text-white font-bold' : 'text-gray-400'}
-                        `}
-                      >
+                      <div key={day} className={`aspect-square flex items-center justify-center text-xs font-medium rounded-full transition-colors cursor-default relative ${isToday ? 'bg-pro-primary text-white font-bold' : 'text-gray-400 hover:bg-pro-bg'}`}>
                         {day}
-                        {hasData && !isToday && (<div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-pro-secondary"></div>)}
-                        {hasEvent && !isToday && (<div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-purple-500 border border-pro-card"></div>)}
+                        {hasData && !isToday && (<div className="absolute bottom-1 w-1 h-1 rounded-full bg-pro-secondary"></div>)}
                       </div>
                     )
                   })}
                 </div>
               </div>
 
-              {/* 6. Upcoming Schedule */}
+              {/* 6. Recent Activity Stream */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4">
-                  <h4 className="font-semibold text-pro-white flex items-center gap-2"><CalendarCheck className="w-4 h-4 text-pink-500"/> Schedule</h4>
-                  <span className="text-[10px] text-gray-500 uppercase">Upcoming</span>
+                  <h4 className="font-semibold text-pro-white flex items-center gap-2"><BookOpen className="w-4 h-4 text-pink-500"/> Recent</h4>
                 </div>
                 <div className="flex-1 space-y-3 overflow-y-auto max-h-48 custom-scrollbar pr-1">
-                  {getUpcomingEvents().length === 0 ? (
-                    <div className="text-center text-gray-600 text-xs py-4">No upcoming events.</div>
+                  {entries.length === 0 ? (
+                    <div className="text-center text-gray-600 text-xs py-4">No entries yet.</div>
                   ) : (
-                    getUpcomingEvents().slice(0, 5).map(e => (
-                      <div key={e.id} className="p-3 bg-pro-bg rounded-lg border border-pro-border hover:border-pink-500/50 transition-all group flex justify-between items-center">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-mono text-pink-400 bg-pink-500/10 px-1.5 py-0.5 rounded">{e.date.slice(5)}</span>
-                            <span className="text-[10px] text-gray-500">{e.time}</span>
-                          </div>
-                          <h5 className="text-sm font-medium text-gray-300 truncate group-hover:text-white max-w-[120px]">{e.title}</h5>
+                    entries.slice(0, 3).map(e => (
+                      <div key={e.id} onClick={() => {setCurrentEntry(e); setEditingId(e.id); setView('write')}} className="p-3 bg-pro-bg rounded-lg border border-pro-border hover:border-pink-500/50 cursor-pointer transition-all group">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="text-xs text-gray-500">{e.date}</span>
+                          {e.mood === 'happy' && <Sun className="w-3 h-3 text-yellow-400"/>}
+                          {e.mood === 'sad' && <Moon className="w-3 h-3 text-indigo-400"/>}
                         </div>
-                        <button onClick={() => deleteEvent(e.id)} className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3"/></button>
+                        <h5 className="text-sm font-medium text-gray-300 truncate group-hover:text-white">{e.title}</h5>
                       </div>
                     ))
                   )}
@@ -765,7 +549,7 @@ export default function JournalApp() {
                 <button onClick={() => window.open('https://eduapp-chi.vercel.app/', '_blank')} className="relative z-10 w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">Launch App <ExternalLink className="w-3 h-3" /></button>
               </div>
 
-              {/* 8. Command Center */}
+              {/* 8. Command Center (NEW: Quick Links) */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="font-semibold text-pro-white flex items-center gap-2"><Link className="w-4 h-4 text-purple-500"/> Command Center</h4>
@@ -794,7 +578,7 @@ export default function JournalApp() {
                 </div>
               </div>
 
-              {/* 9. Quick Notes */}
+              {/* 9. Quick Notes (Expanded) */}
               <div className="lg:col-span-2 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="font-semibold text-pro-white flex items-center gap-2"><Save className="w-4 h-4 text-yellow-500"/> Quick Notes</h4>
@@ -809,134 +593,6 @@ export default function JournalApp() {
                 />
               </div>
 
-            </div>
-          )}
-
-          {/* --- EVENT MODAL --- */}
-          {isEventModalOpen && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
-              <div className="bg-pro-card border border-pro-border rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
-                <button onClick={() => setEventModalOpen(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X className="w-5 h-5"/></button>
-                <h3 className="text-xl font-bold text-pro-white mb-4 flex items-center gap-2">
-                  <CalendarIcon className="w-5 h-5 text-purple-500" /> Events for {selectedDate}
-                </h3>
-                <div className="space-y-3 mb-6 max-h-48 overflow-y-auto custom-scrollbar">
-                  {events.filter(e => e.date === selectedDate).length === 0 ? (
-                    <p className="text-xs text-gray-500 text-center py-2">No events scheduled.</p>
-                  ) : (
-                    events.filter(e => e.date === selectedDate).map(e => (
-                      <div key={e.id} className="flex items-center justify-between p-3 bg-pro-bg rounded-lg border border-pro-border">
-                        <div>
-                          <p className="text-sm text-white font-medium">{e.title}</p>
-                          <p className="text-xs text-gray-500 flex items-center gap-1"><Clock className="w-3 h-3"/> {e.time}</p>
-                        </div>
-                        <button onClick={() => deleteEvent(e.id)} className="text-gray-600 hover:text-red-400"><Trash2 className="w-4 h-4"/></button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                <div className="border-t border-pro-border pt-4">
-                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Add New Event</h4>
-                  <div className="space-y-3">
-                    <input type="text" placeholder="Event Title..." value={newEvent.title} onChange={(e) => setNewEvent({...newEvent, title: e.target.value})} className="w-full bg-pro-bg border border-pro-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500" />
-                    <div className="flex gap-2">
-                      <input type="time" value={newEvent.time} onChange={(e) => setNewEvent({...newEvent, time: e.target.value})} className="flex-1 bg-pro-bg border border-pro-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500" />
-                      <button onClick={saveEvent} disabled={!newEvent.title} className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"><Plus className="w-4 h-4" /> Add</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* --- SECURITY LOCK MODAL (NEW) --- */}
-          {isPinPromptOpen && (
-            <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fadeIn">
-              <div className="bg-pro-card border border-pro-border rounded-2xl p-8 w-full max-w-sm shadow-2xl flex flex-col items-center">
-                <div className="w-16 h-16 bg-purple-500/10 rounded-full flex items-center justify-center mb-4">
-                  {pinMode === 'unlock' ? <Lock className="w-8 h-8 text-purple-500" /> : <Shield className="w-8 h-8 text-blue-500" />}
-                </div>
-                <h3 className="text-xl font-bold text-pro-white mb-2">
-                  {pinMode === 'unlock' ? 'Security Lock Active' : 
-                   pinMode === 'setup' ? 'Set New PIN' : 
-                   pinMode === 'verify_current' ? 'Verify Current PIN' :
-                   pinMode === 'verify_remove' ? 'Disable Security' : 
-                   'Verify Current PIN'}
-                </h3>
-                <p className="text-sm text-gray-500 mb-6 text-center">
-                  {pinMode === 'unlock' ? 'Enter your 6-digit PIN to access this journal.' : 
-                   pinMode === 'verify_remove' ? 'Enter current PIN to disable security.' : 
-                   'Enter a 6-digit PIN to secure your data.'}
-                </p>
-                <div className="flex justify-center gap-2 mb-6">
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} className={`w-3 h-3 rounded-full transition-all ${pinInput.length > i ? 'bg-purple-500 scale-125' : 'bg-gray-700'}`}></div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-3 gap-3 w-full max-w-[240px]">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, 'Go'].map((key) => (
-                    <button 
-                      key={key}
-                      onClick={() => {
-                        if (key === 'C') setPinInput('');
-                        else if (key === 'Go') handlePinSubmit();
-                        else if (pinInput.length < 6) setPinInput(prev => prev + key);
-                      }}
-                      className={`
-                        h-12 rounded-xl text-lg font-bold transition-all active:scale-95 flex items-center justify-center
-                        ${key === 'Go' ? 'bg-purple-600 text-white' : key === 'C' ? 'bg-red-500/10 text-red-400' : 'bg-pro-bg border border-pro-border text-gray-300 hover:bg-white/5'}
-                      `}
-                    >
-                      {key === 'Go' ? (pinMode === 'unlock' ? <Unlock className="w-5 h-5"/> : <CheckCircle className="w-5 h-5"/>) : key}
-                    </button>
-                  ))}
-                </div>
-                {pinMode === 'unlock' && (
-                  <button onClick={() => setIsPinPromptOpen(false)} className="mt-6 text-xs text-gray-500 hover:text-white">Cancel Authentication</button>
-                )}
-                {pinMode === 'verify_remove' && (
-                  <button onClick={() => { setIsPinPromptOpen(false); setIsSettingsOpen(true); }} className="mt-6 text-xs text-gray-500 hover:text-white">Cancel</button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* --- SETTINGS MODAL (NEW) --- */}
-          {isSettingsOpen && (
-            <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
-              <div className="bg-pro-card border border-pro-border rounded-2xl p-6 w-full max-w-md shadow-2xl relative">
-                <button onClick={() => setIsSettingsOpen(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X className="w-5 h-5"/></button>
-                <h3 className="text-xl font-bold text-pro-white mb-6 flex items-center gap-2">
-                  <SettingsIcon className="w-5 h-5 text-gray-400" /> Settings
-                </h3>
-                <div className="space-y-4">
-                  <div className="bg-pro-bg rounded-xl border border-pro-border p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${securityPin ? 'bg-green-500/10 text-green-500' : 'bg-gray-700/30 text-gray-500'}`}>
-                          <Shield className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h4 className="font-medium text-white">Journal Security</h4>
-                          <p className="text-xs text-gray-500">{securityPin ? 'PIN Protection Active' : 'No PIN Set'}</p>
-                        </div>
-                      </div>
-                      {securityPin && <span className="text-[10px] bg-green-500/10 text-green-500 px-2 py-1 rounded border border-green-500/20">SECURE</span>}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 mt-4">
-                      {securityPin ? (
-                        <>
-                          <button onClick={() => { setPinMode('verify_current'); setPinInput(''); setIsPinPromptOpen(true); setIsSettingsOpen(false); }} className="py-2 px-3 bg-pro-card border border-pro-border rounded-lg text-xs text-white hover:bg-white/5 transition-colors">Change PIN</button>
-                          <button onClick={initiateRemovePin} className="py-2 px-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-colors">Remove Security</button>
-                        </>
-                      ) : (
-                        <button onClick={() => { setPinMode('setup'); setPinInput(''); setIsPinPromptOpen(true); setIsSettingsOpen(false); }} className="col-span-2 py-2 px-3 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs text-white font-medium transition-colors flex items-center justify-center gap-2"><KeyRound className="w-3 h-3"/> Setup PIN Protection</button>
-                      )}
-                    </div>
-                  </div>
-                  {/* Add more settings here later if needed */}
-                </div>
-              </div>
             </div>
           )}
 
