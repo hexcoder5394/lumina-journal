@@ -7,7 +7,7 @@ import {
   Moon, Sun, Edit3, Menu, GraduationCap, ExternalLink, Sunrise,
   Linkedin, Github, TrendingUp, Mail, Link, Bell, CalendarCheck, Trash2,
   Lock, Unlock, Shield, KeyRound, Settings as SettingsIcon, CreditCard,
-  HardDrive, FileText, Image as ImageIcon, File, Folder // Vault Icons
+  HardDrive, FileText, Image as ImageIcon, File, Folder // NEW VAULT ICONS
 } from 'lucide-react';
 import { db, auth } from './firebase'; 
 import { collection, getDocs, setDoc, doc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
@@ -23,14 +23,13 @@ const debounce = (func, delay) => {
   };
 };
 
-// Helper: Get Favicon from URL (UPDATED to DuckDuckGo to fix blocking issues)
+// Helper: Get Favicon from URL
 const getFavicon = (url) => {
   try {
     const domain = new URL(url).hostname;
-    // Using DuckDuckGo's favicon service as it's less likely to be blocked by adblockers/CORS
-    return `https://icons.duckduckgo.com/ip3/${domain}.ico`;
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
   } catch (e) {
-    return 'https://icons.duckduckgo.com/ip3/google.com.ico'; 
+    return 'https://www.google.com/s2/favicons?domain=google.com'; 
   }
 };
 
@@ -58,10 +57,10 @@ export default function JournalApp() {
   const [newLink, setNewLink] = useState({ title: '', url: '' });
   const [newSub, setNewSub] = useState({ name: '', cost: '', url: '' });
 
-  // --- VAULT STATE ---
+  // --- VAULT STATE (NEW) ---
   const [vaultItems, setVaultItems] = useState([]);
   const [isVaultModalOpen, setIsVaultModalOpen] = useState(false);
-  const [newVaultItem, setNewVaultItem] = useState({ title: '', type: 'doc', value: '' });
+  const [newVaultItem, setNewVaultItem] = useState({ title: '', type: 'doc', value: '' }); // value = url or note
 
   // --- SECURITY STATE ---
   const [securityPin, setSecurityPin] = useState(null); 
@@ -106,7 +105,7 @@ export default function JournalApp() {
         subscribeToDashboard(u.uid);
         loadEvents(u.uid);
         loadSecuritySettings(u.uid);
-        loadVaultItems(u.uid);
+        loadVaultItems(u.uid); // Load Vault
       }
     });
 
@@ -125,7 +124,7 @@ export default function JournalApp() {
     return () => { unsubscribe(); clearInterval(timer); };
   }, []);
 
-  // --- VAULT LOGIC ---
+  // --- VAULT LOGIC (NEW) ---
   const loadVaultItems = async (uid) => {
     const q = query(collection(db, "vault_items"), where("userId", "==", uid));
     const snap = await getDocs(q);
@@ -238,7 +237,7 @@ export default function JournalApp() {
   };
 
   const handleNavigation = (destination) => {
-    const protectedViews = ['write', 'entries', 'vault']; 
+    const protectedViews = ['write', 'entries', 'vault']; // ADDED 'vault' to protected views
     if (protectedViews.includes(destination) && securityPin) {
       if (Date.now() < sessionExpiry) setView(destination);
       else {
@@ -369,7 +368,7 @@ export default function JournalApp() {
         <div className={`mx-auto ${zenMode ? 'h-full flex items-center justify-center' : 'p-8 max-w-7xl'}`}>
           {view === 'dashboard' && !zenMode && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* Widgets */}
+              {/* Widgets (Time, Timer, Budget, Habits, Calendar, Schedule, Subs, Edu, Commands, Notes) - Same as before */}
               <div className="lg:col-span-2 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col justify-between relative overflow-hidden group"><div className="flex justify-between items-start z-10"><div className="p-2 bg-pro-bg rounded-lg border border-pro-border"><Clock className="w-5 h-5 text-pro-secondary" /></div><div className="text-right"><span className="text-3xl font-bold text-pro-white">{weather?.temperature}°</span><p className="text-xs text-gray-500 uppercase tracking-wider">Colombo, LK</p></div></div><div className="mt-8 z-10"><h3 className="text-6xl font-bold text-pro-white tracking-tighter font-mono">{time.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</h3><p className="text-pro-text mt-2 font-medium">{time.toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'})}</p></div></div>
               <div className="lg:col-span-1 bg-gradient-primary rounded-2xl p-6 shadow-lg shadow-indigo-500/20 text-white flex flex-col justify-between relative overflow-hidden"><div className="z-10 w-full"><div className="flex justify-between items-center mb-1"><h4 className="text-indigo-100 font-medium text-sm">Focus Session</h4><button onClick={() => setIsEditingTimer(true)} className="text-indigo-200 hover:text-white p-1 rounded hover:bg-white/10"><Edit3 className="w-4 h-4" /></button></div>{isEditingTimer ? (<div className="flex items-center gap-2 mb-2"><input type="number" autoFocus value={customMinutes} onChange={(e) => setCustomMinutes(e.target.value)} className="w-16 bg-white/20 text-white text-2xl font-bold font-mono p-1 rounded border border-white/30 text-center" /><button onClick={saveCustomTimer} className="bg-white/20 hover:bg-white/30 p-1 px-3 rounded text-sm">Set</button></div>) : (<span className="text-5xl font-bold font-mono block cursor-pointer">{Math.floor(pomoTime/60).toString().padStart(2,'0')}:{ (pomoTime%60).toString().padStart(2,'0') }</span>)}</div><div className="flex gap-3 mt-4 z-10"><button onClick={() => setPomoActive(!pomoActive)} className="flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2">{pomoActive ? <Pause className="w-4 h-4"/> : <Play className="w-4 h-4"/>} {pomoActive ? 'Pause' : 'Start'}</button><button onClick={() => {setPomoActive(false); setPomoTime(initialPomoTime)}} className="px-3 bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-lg"><RotateCw className="w-4 h-4"/></button></div></div>
               
