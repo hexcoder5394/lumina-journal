@@ -72,21 +72,22 @@ export default function JournalApp() {
   const [newEvent, setNewEvent] = useState({ title: '', time: '' });
   const [dailyReminder, setDailyReminder] = useState(null);
 
+  // --- BUDGET STATE (RESTORED LOGIC) ---
+  const [financeData, setFinanceData] = useState({ income: 0, expense: 0, loaded: false });
+  const [selectedFinMonth, setSelectedFinMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [isEditingBudget, setIsEditingBudget] = useState(false);
+  const [tempBudget, setTempBudget] = useState({ income: '' });
+
   // --- WIDGET DATA ---
   const [weather, setWeather] = useState(null);
-  
-  // --- TIMER STATE ---
   const [pomoTime, setPomoTime] = useState(25 * 60);
   const [pomoActive, setPomoActive] = useState(false);
   const [initialPomoTime, setInitialPomoTime] = useState(25 * 60);
   const [isEditingTimer, setIsEditingTimer] = useState(false);
   const [customMinutes, setCustomMinutes] = useState('25');
-
   const [memo, setMemo] = useState('');
   const [habits, setHabits] = useState([]);
   const [newHabit, setNewHabit] = useState('');
-  const [financeData, setFinanceData] = useState({ income: 0, planned: 0, remaining: 0, loaded: false });
-  const [selectedFinMonth, setSelectedFinMonth] = useState(new Date().toISOString().slice(0, 7));
 
   // --- INITIALIZATION ---
   useEffect(() => {
@@ -147,7 +148,45 @@ export default function JournalApp() {
     }, { merge: true });
   };
 
-  // --- COMMAND CENTER LOGIC (FIXED) ---
+  // --- BUDGET SYNC (RESTORED FROM V6) ---
+  useEffect(() => {
+    if (!user) return;
+    const appId = 'default-503020-app';
+    const budgetDoc = doc(db, "artifacts", appId, "users", user.uid, "budget", selectedFinMonth);
+    const itemsCol = collection(budgetDoc, "items");
+
+    const unsubscribe = onSnapshot(budgetDoc, (snap) => {
+      const inc = snap.data()?.income || 0;
+      
+      // Listen to the sub-collection 'items' to calculate expenses
+      onSnapshot(itemsCol, (iSnap) => {
+        let planned = 0;
+        iSnap.forEach(doc => planned += (doc.data().amount || 0));
+        
+        setFinanceData({ 
+          income: inc, 
+          expense: planned, // Mapped 'planned' to 'expense' for the new UI
+          loaded: true 
+        });
+        setTempBudget({ income: inc || '' });
+      });
+    });
+
+    return () => unsubscribe();
+  }, [user, selectedFinMonth]);
+
+  const saveBudgetIncome = async () => {
+    if (!user) return;
+    const incomeVal = parseFloat(tempBudget.income) || 0;
+    // Only update income, let expenses be calculated from items
+    await setDoc(doc(db, "artifacts", "default-503020-app", "users", user.uid, "budget", selectedFinMonth), {
+      income: incomeVal
+    }, { merge: true });
+    
+    setIsEditingBudget(false);
+  };
+
+  // --- COMMAND CENTER LOGIC ---
   const addCommandLink = () => {
     if(!newLink.title || !newLink.url) return;
     const updated = [...commandLinks, { id: Date.now(), ...newLink }];
@@ -270,11 +309,14 @@ export default function JournalApp() {
       else if (e.key === 'Backspace') setPinInput(prev => prev.slice(0, -1));
       else if (e.key === 'Delete') setPinInput('');
       else if (e.key === 'Enter') handlePinSubmit();
-      else if (e.key === 'Escape') setIsPinPromptOpen(false);
+      else if (e.key === 'Escape') {
+         if(pinMode === 'unlock') setIsPinPromptOpen(false);
+         else if(pinMode === 'verify_remove') { setIsPinPromptOpen(false); setIsSettingsOpen(true); }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPinPromptOpen, handlePinSubmit]);
+  }, [isPinPromptOpen, handlePinSubmit, pinMode]);
 
   // --- EVENTS, TIMER, CALENDAR ---
   const loadEvents = async (uid) => {
@@ -442,17 +484,37 @@ export default function JournalApp() {
                 </div>
               </div>
 
-              {/* 3. BudgetFlow */}
+              {/* 3. BudgetFlow Widget (RESTORED CALCULATION) */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="font-semibold text-pro-white flex items-center gap-2"><DollarSign className="w-4 h-4 text-green-500"/> Budget</h4>
-                  <div className="flex gap-1 bg-pro-bg rounded-md p-1"><button onClick={() => setSelectedFinMonth(m => {const d=new Date(m); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7)})} className="p-1 hover:text-white"><ChevronLeft className="w-3 h-3"/></button><button onClick={() => setSelectedFinMonth(m => {const d=new Date(m); d.setMonth(d.getMonth()+1); return d.toISOString().slice(0,7)})} className="p-1 hover:text-white"><ChevronRight className="w-3 h-3"/></button></div>
+                  <div className="flex items-center gap-2 bg-pro-bg rounded-lg p-1 border border-pro-border">
+                    <button onClick={() => setSelectedFinMonth(m => {const d = new Date(m + "-01"); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7);})} className="p-1 text-gray-500 hover:text-white transition-colors"><ChevronLeft className="w-3 h-3"/></button>
+                    <span className="text-xs font-mono font-medium text-gray-300 min-w-[50px] text-center">{new Date(selectedFinMonth + "-01").toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}</span>
+                    <button onClick={() => setSelectedFinMonth(m => {const d = new Date(m + "-01"); d.setMonth(d.getMonth() + 1); return d.toISOString().slice(0, 7);})} className="p-1 text-gray-500 hover:text-white transition-colors"><ChevronRight className="w-3 h-3"/></button>
+                  </div>
                 </div>
-                <div className="space-y-4">
-                  <div><span className="text-xs text-gray-500 uppercase">Remaining</span><div className={`text-2xl font-bold ${financeData.remaining < 0 ? 'text-red-500' : 'text-emerald-400'}`}>${financeData.remaining.toLocaleString()}</div></div>
-                  <div className="w-full bg-pro-bg rounded-full h-2 overflow-hidden"><div className="h-full bg-pro-secondary rounded-full transition-all duration-1000" style={{width: `${Math.min((financeData.planned/financeData.income)*100, 100)}%`}}></div></div>
-                  <button onClick={() => window.open('https://budget.infinityfree.me/?i=1', '_blank')} className="w-full py-2 text-xs font-medium bg-pro-bg hover:bg-pro-border rounded-lg text-pro-text transition-colors flex items-center justify-center gap-2 group">Open BudgetFlow <ExternalLink className="w-3 h-3 group-hover:translate-x-1" /></button>
-                </div>
+                
+                {financeData.loaded ? (
+                  isEditingBudget ? (
+                    <div className="space-y-2 animate-fadeIn">
+                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500">Income (Edit)</span><input className="w-full bg-pro-bg border border-pro-border rounded px-2 py-1 text-xs text-white" value={tempBudget.income} onChange={e=>setTempBudget({...tempBudget, income:e.target.value})} placeholder="5000" /></div>
+                      <div className="flex gap-2 pt-1"><button onClick={saveBudgetIncome} className="flex-1 bg-green-600 text-white py-1 rounded text-xs">Save</button><button onClick={()=>setIsEditingBudget(false)} className="flex-1 bg-gray-700 text-white py-1 rounded text-xs">Cancel</button></div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div><span className="text-xs text-gray-500 uppercase">Remaining</span><div className={`text-2xl font-bold ${financeData.income - financeData.expense < 0 ? 'text-red-500' : 'text-emerald-400'}`}>${(financeData.income - financeData.expense).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div></div>
+                      <div className="w-full bg-pro-bg rounded-full h-2 overflow-hidden relative"><div className={`h-full rounded-full transition-all duration-1000 ${financeData.income - financeData.expense < 0 ? 'bg-red-500' : 'bg-green-500'}`} style={{width: `${Math.min((financeData.expense / (financeData.income || 1)) * 100, 100)}%`}}></div></div>
+                      <div className="flex justify-between text-[10px] text-gray-500"><span>Spent: ${financeData.expense.toLocaleString()}</span><span>Income: ${financeData.income.toLocaleString()}</span></div>
+                      <div className="flex gap-2">
+                        <button onClick={() => window.open('https://budget.infinityfree.me/?i=1', '_blank')} className="flex-1 py-1.5 text-xs font-medium bg-pro-bg hover:bg-pro-border rounded-lg text-pro-text transition-colors flex items-center justify-center gap-1">App <ExternalLink className="w-3 h-3" /></button>
+                        <button onClick={() => setIsEditingBudget(true)} className="px-2 py-1.5 bg-pro-bg hover:bg-pro-border rounded-lg text-gray-400 hover:text-white transition-colors" title="Edit Income"><Edit3 className="w-3 h-3" /></button>
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-xs text-gray-500 animate-pulse gap-2"><RotateCw className="w-4 h-4 animate-spin"/><span>Syncing...</span></div>
+                )}
               </div>
 
               {/* 4. Habits */}
@@ -481,7 +543,7 @@ export default function JournalApp() {
                     if (!day) return <div key={`empty-${idx}`} className="aspect-square"></div>;
                     const hasEvent = hasEventOnDay(day);
                     const isToday = day === new Date().getDate();
-                    return <div key={day} onClick={() => { setSelectedDate(`${time.toISOString().slice(0,7)}-${day.toString().padStart(2,'0')}`); setEventModalOpen(true); }} className={`aspect-square flex items-center justify-center text-xs font-medium rounded-full transition-all cursor-pointer relative hover:bg-pro-primary/20 ${isToday ? 'bg-pro-primary text-white font-bold' : 'text-gray-400'}`}>{day}{hasEvent && !isToday && <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-purple-500 border border-pro-card"></div>}</div>
+                    return <div key={idx} onClick={() => { setSelectedDate(`${time.toISOString().slice(0,7)}-${day.toString().padStart(2,'0')}`); setEventModalOpen(true); }} className={`aspect-square flex items-center justify-center text-xs font-medium rounded-full transition-all cursor-pointer relative hover:bg-pro-primary/20 ${isToday ? 'bg-pro-primary text-white font-bold' : 'text-gray-400'}`}>{day}{hasEvent && !isToday && <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-purple-500 border border-pro-card"></div>}</div>
                   })}
                 </div>
               </div>
@@ -538,7 +600,7 @@ export default function JournalApp() {
                 <button onClick={() => window.open('https://eduapp-chi.vercel.app/', '_blank')} className="relative z-10 w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">Launch App <ExternalLink className="w-3 h-3" /></button>
               </div>
 
-              {/* 9. Command Center (DYNAMIC & FIXED) */}
+              {/* 9. Command Center (STACKED EDIT FORM) */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="font-semibold text-pro-white flex items-center gap-2"><Link className="w-4 h-4 text-purple-500"/> Commands</h4>
@@ -577,8 +639,8 @@ export default function JournalApp() {
             </div>
           )}
 
-          {/* ... Modals (Event, Security, Settings) ... */}
-          {/* Re-inserting modlas for completeness */}
+          {/* ... Modals (Event, Security, Settings) - (Standard code block) ... */}
+          {/* Re-including modal code blocks for completeness */}
           {isEventModalOpen && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
               <div className="bg-pro-card border border-pro-border rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
@@ -597,7 +659,7 @@ export default function JournalApp() {
               <div className="bg-pro-card border border-pro-border rounded-2xl p-8 w-full max-w-sm shadow-2xl flex flex-col items-center">
                 <div className="w-16 h-16 bg-purple-500/10 rounded-full flex items-center justify-center mb-4">{pinMode === 'unlock' ? <Lock className="w-8 h-8 text-purple-500" /> : <Shield className="w-8 h-8 text-blue-500" />}</div>
                 <h3 className="text-xl font-bold text-pro-white mb-2">{pinMode === 'unlock' ? 'Security Lock Active' : pinMode === 'verify_remove' ? 'Disable Security' : 'Enter PIN'}</h3>
-                <p className="text-sm text-gray-500 mb-6 text-center">{pinMode === 'unlock' ? 'Enter PIN to access.' : 'Verify authorization.'}</p>
+                <p className="text-sm text-gray-500 mb-6 text-center">{pinMode === 'unlock' ? 'Enter PIN to access.' : pinMode === 'verify_remove' ? 'Enter current PIN to verify.' : 'Enter a 6-digit PIN.'}</p>
                 <div className="flex justify-center gap-2 mb-6">{[...Array(6)].map((_, i) => (<div key={i} className={`w-3 h-3 rounded-full transition-all ${pinInput.length > i ? 'bg-purple-500 scale-125' : 'bg-gray-700'}`}></div>))}</div>
                 <div className="grid grid-cols-3 gap-3 w-full max-w-[240px]">
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, 'Go'].map((key) => (
@@ -626,7 +688,6 @@ export default function JournalApp() {
             </div>
           )}
 
-          {/* ... Write/Entries/Stats (Standard) ... */}
           {(view === 'write' || zenMode) && (
             <div className={`relative flex flex-col h-full ${zenMode ? 'max-w-3xl mx-auto w-full' : 'bg-pro-card rounded-2xl border border-pro-border p-8 shadow-sm h-[calc(100vh-140px)]'}`}>
               <div className="absolute top-4 right-4 z-20"><button onClick={() => setZenMode(!zenMode)} className="p-2 text-gray-400 hover:text-white bg-pro-bg rounded-full border border-pro-border">{zenMode ? <Minimize2 className="w-5 h-5"/> : <Maximize2 className="w-5 h-5"/>}</button></div>
