@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  LayoutDashboard, PenTool, BookOpen, BarChart2, // Sidebar
-  Clock, Cloud, Zap, Play, Pause, RotateCw, // Widgets
+  LayoutDashboard, PenTool, BookOpen, BarChart2, // Sidebar Icons
+  Clock, Cloud, Zap, Play, Pause, RotateCw, // Widget Icons
   CheckCircle, Plus, X, Save, DollarSign, Calendar as CalendarIcon,
   ChevronLeft, ChevronRight, Maximize2, Minimize2, LogOut,
   Moon, Sun, Edit3, Menu, GraduationCap, ExternalLink, Sunrise,
   Linkedin, Github, TrendingUp, Mail, Link, Bell, CalendarCheck, Trash2,
-  Lock, Unlock, Shield, KeyRound, Settings as SettingsIcon, CreditCard // NEW: CreditCard
+  Lock, Unlock, Shield, KeyRound, Settings as SettingsIcon, CreditCard
 } from 'lucide-react';
 import { db, auth } from './firebase'; 
 import { collection, getDocs, setDoc, doc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import Login from './Login';
 
-// Helper: Debounce writes
+// Helper for debouncing writes
 const debounce = (func, delay) => {
   let timeoutId;
   return (...args) => {
@@ -28,7 +28,7 @@ const getFavicon = (url) => {
     const domain = new URL(url).hostname;
     return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
   } catch (e) {
-    return 'https://www.google.com/s2/favicons?domain=google.com'; // Fallback
+    return 'https://www.google.com/s2/favicons?domain=google.com'; 
   }
 };
 
@@ -47,26 +47,25 @@ export default function JournalApp() {
   const [currentEntry, setCurrentEntry] = useState({ title: '', content: '', date: new Date().toISOString().split('T')[0], mood: null });
   const [editingId, setEditingId] = useState(null);
   
-  // --- COMMAND & SUBSCRIPTION STATE (NEW) ---
+  // --- COMMAND & SUBSCRIPTION STATE ---
   const [commandLinks, setCommandLinks] = useState([]);
   const [subscriptions, setSubscriptions] = useState([]);
   const [isEditingCommands, setIsEditingCommands] = useState(false);
   const [isEditingSubs, setIsEditingSubs] = useState(false);
   
-  // Form State for new items
   const [newLink, setNewLink] = useState({ title: '', url: '' });
   const [newSub, setNewSub] = useState({ name: '', cost: '', url: '' });
 
   // --- SECURITY STATE ---
-  const [securityPin, setSecurityPin] = useState(null);
-  const [sessionExpiry, setSessionExpiry] = useState(0);
-  const [isPinPromptOpen, setIsPinPromptOpen] = useState(false);
-  const [pinInput, setPinInput] = useState('');
-  const [targetView, setTargetView] = useState(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [pinMode, setPinMode] = useState('unlock');
+  const [securityPin, setSecurityPin] = useState(null); 
+  const [sessionExpiry, setSessionExpiry] = useState(0); 
+  const [isPinPromptOpen, setIsPinPromptOpen] = useState(false); 
+  const [pinInput, setPinInput] = useState(''); 
+  const [targetView, setTargetView] = useState(null); 
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false); 
+  const [pinMode, setPinMode] = useState('unlock'); 
   
-  // --- EVENTS STATE ---
+  // --- EVENTS & REMINDERS STATE ---
   const [events, setEvents] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
   const [isEventModalOpen, setEventModalOpen] = useState(false);
@@ -75,11 +74,14 @@ export default function JournalApp() {
 
   // --- WIDGET DATA ---
   const [weather, setWeather] = useState(null);
+  
+  // --- TIMER STATE ---
   const [pomoTime, setPomoTime] = useState(25 * 60);
   const [pomoActive, setPomoActive] = useState(false);
   const [initialPomoTime, setInitialPomoTime] = useState(25 * 60);
   const [isEditingTimer, setIsEditingTimer] = useState(false);
   const [customMinutes, setCustomMinutes] = useState('25');
+
   const [memo, setMemo] = useState('');
   const [habits, setHabits] = useState([]);
   const [newHabit, setNewHabit] = useState('');
@@ -98,7 +100,9 @@ export default function JournalApp() {
         loadSecuritySettings(u.uid);
       }
     });
+
     const timer = setInterval(() => setTime(new Date()), 1000);
+    
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (pos) => {
         try {
@@ -108,19 +112,19 @@ export default function JournalApp() {
         } catch(e) {}
       });
     }
+
     return () => { unsubscribe(); clearInterval(timer); };
   }, []);
 
-  // --- DATA LOADING & SAVING ---
+  // --- DASHBOARD SYNC ---
   const subscribeToDashboard = (uid) => {
     const ref = doc(db, "artifacts", "default-503020-app", "users", uid, "lumina_dashboard", "daily");
     onSnapshot(ref, (snap) => {
       if(snap.exists()) {
         const d = snap.data();
         setMemo(d.memo || '');
-        setCommandLinks(d.commandLinks || []); // Load Links
-        setSubscriptions(d.subscriptions || []); // Load Subs
-        
+        setCommandLinks(d.commandLinks || []); 
+        setSubscriptions(d.subscriptions || []); 
         const today = new Date().toISOString().split('T')[0];
         if(d.date !== today) {
            const reset = (d.habits || []).map(h => ({...h, completed: false}));
@@ -143,7 +147,7 @@ export default function JournalApp() {
     }, { merge: true });
   };
 
-  // --- COMMAND CENTER LOGIC ---
+  // --- COMMAND CENTER LOGIC (FIXED) ---
   const addCommandLink = () => {
     if(!newLink.title || !newLink.url) return;
     const updated = [...commandLinks, { id: Date.now(), ...newLink }];
@@ -177,14 +181,14 @@ export default function JournalApp() {
     return subscriptions.reduce((acc, curr) => acc + (parseFloat(curr.cost) || 0), 0);
   };
 
-  // --- STANDARD LOGIC (Unchanged for brevity: Memo, Habits, Timer, Security) ---
-  // (Included in full file, condensed representation here for context)
+  // --- MEMO & HABITS ---
   const debouncedSaveMemo = useCallback(debounce((uid, m, h, cl, s) => saveDashboard(uid, m, h, cl, s), 1500), []);
   const handleMemo = (e) => {
     const val = e.target.value;
     setMemo(val);
     if(user) debouncedSaveMemo(user.uid, val, habits, commandLinks, subscriptions);
   };
+
   const toggleHabit = (id) => {
     const updated = habits.map(h => h.id === id ? {...h, completed: !h.completed} : h);
     setHabits(updated);
@@ -212,6 +216,7 @@ export default function JournalApp() {
       else setSecurityPin(null);
     });
   };
+
   const handleNavigation = (destination) => {
     const protectedViews = ['write', 'entries'];
     if (protectedViews.includes(destination) && securityPin) {
@@ -224,6 +229,7 @@ export default function JournalApp() {
       }
     } else setView(destination);
   };
+
   const handlePinSubmit = useCallback(async () => {
     if (pinMode === 'unlock') {
       if (pinInput === securityPin) {
@@ -231,13 +237,15 @@ export default function JournalApp() {
         setIsPinPromptOpen(false);
         if (targetView) setView(targetView);
       } else { alert("ACCESS DENIED: Incorrect PIN"); setPinInput(''); }
-    } else if (pinMode === 'setup' || pinMode === 'set_new') {
+    } 
+    else if (pinMode === 'setup' || pinMode === 'set_new') {
       if (pinInput.length === 6) {
         await setDoc(doc(db, "artifacts", "default-503020-app", "users", user.uid, "lumina_dashboard", "security"), { pin: pinInput }, { merge: true });
         setIsPinPromptOpen(false);
         alert(pinMode === 'setup' ? "Security Protocol Engaged." : "PIN Updated.");
       }
-    } else if (pinMode === 'verify_current' || pinMode === 'verify_remove') {
+    } 
+    else if (pinMode === 'verify_current' || pinMode === 'verify_remove') {
       if (pinInput === securityPin) {
         if (pinMode === 'verify_remove') {
           await setDoc(doc(db, "artifacts", "default-503020-app", "users", user.uid, "lumina_dashboard", "security"), { pin: null });
@@ -251,7 +259,7 @@ export default function JournalApp() {
       } else { alert("Incorrect PIN"); setPinInput(''); }
     }
   }, [pinMode, pinInput, securityPin, targetView, user]);
-  
+
   const initiateRemovePin = () => { setPinMode('verify_remove'); setPinInput(''); setIsPinPromptOpen(true); setIsSettingsOpen(false); };
 
   // --- PIN KEYBOARD LISTENER ---
@@ -268,7 +276,7 @@ export default function JournalApp() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isPinPromptOpen, handlePinSubmit]);
 
-  // --- EVENTS, TIMER, CALENDAR (Standard) ---
+  // --- EVENTS, TIMER, CALENDAR ---
   const loadEvents = async (uid) => {
     const q = query(collection(db, "calendar_events"), where("userId", "==", uid));
     const snap = await getDocs(q);
@@ -294,6 +302,18 @@ export default function JournalApp() {
     if (pomoActive && pomoTime > 0) int = setInterval(() => setPomoTime(t => t - 1), 1000);
     return () => clearInterval(int);
   }, [pomoActive, pomoTime]);
+
+  const saveCustomTimer = () => {
+    const mins = parseInt(customMinutes);
+    if (!isNaN(mins) && mins > 0) {
+      const newSeconds = mins * 60;
+      setInitialPomoTime(newSeconds);
+      setPomoTime(newSeconds);
+      setIsEditingTimer(false);
+    } else {
+      setIsEditingTimer(false);
+    }
+  };
 
   // Helpers
   const getCalendarDays = () => {
@@ -388,7 +408,7 @@ export default function JournalApp() {
           {view === 'dashboard' && !zenMode && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               
-              {/* 1. Time & Weather (2 cols) */}
+              {/* 1. Time & Weather */}
               <div className="lg:col-span-2 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col justify-between relative overflow-hidden group">
                 <div className="flex justify-between items-start z-10">
                   <div className="p-2 bg-pro-bg rounded-lg border border-pro-border"><Clock className="w-5 h-5 text-pro-secondary" /></div>
@@ -400,7 +420,7 @@ export default function JournalApp() {
                 </div>
               </div>
 
-              {/* 2. Focus Timer (1 col) */}
+              {/* 2. Focus Timer */}
               <div className="lg:col-span-1 bg-gradient-primary rounded-2xl p-6 shadow-lg shadow-indigo-500/20 text-white flex flex-col justify-between relative overflow-hidden">
                 <div className="z-10 w-full">
                   <div className="flex justify-between items-center mb-1">
@@ -422,7 +442,7 @@ export default function JournalApp() {
                 </div>
               </div>
 
-              {/* 3. BudgetFlow (1 col) */}
+              {/* 3. BudgetFlow */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="font-semibold text-pro-white flex items-center gap-2"><DollarSign className="w-4 h-4 text-green-500"/> Budget</h4>
@@ -435,7 +455,7 @@ export default function JournalApp() {
                 </div>
               </div>
 
-              {/* 4. Habits (1 col) */}
+              {/* 4. Habits */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="font-semibold text-pro-white flex items-center gap-2"><CheckCircle className="w-4 h-4 text-pro-primary"/> Habits</h4>
@@ -452,7 +472,7 @@ export default function JournalApp() {
                 <div className="mt-3"><input type="text" value={newHabit} onChange={(e) => setNewHabit(e.target.value)} onKeyDown={addHabitAction} placeholder="Add..." className="w-full bg-pro-bg border border-pro-border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pro-primary" /></div>
               </div>
 
-              {/* 5. Calendar (1 col) */}
+              {/* 5. Calendar */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4"><h4 className="font-semibold text-pro-white flex items-center gap-2"><CalendarIcon className="w-4 h-4 text-pro-secondary"/> Calendar</h4></div>
                 <div className="grid grid-cols-7 gap-1 text-center text-xs mb-2">{['S','M','T','W','T','F','S'].map((d, i) => (<span key={i} className="text-gray-600 font-bold">{d}</span>))}</div>
@@ -466,7 +486,7 @@ export default function JournalApp() {
                 </div>
               </div>
 
-              {/* 6. Upcoming Schedule (1 col) */}
+              {/* 6. Upcoming Schedule */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4"><h4 className="font-semibold text-pro-white flex items-center gap-2"><CalendarCheck className="w-4 h-4 text-pink-500"/> Schedule</h4><span className="text-[10px] text-gray-500 uppercase">Upcoming</span></div>
                 <div className="flex-1 space-y-3 overflow-y-auto max-h-48 custom-scrollbar pr-1">
@@ -474,7 +494,7 @@ export default function JournalApp() {
                 </div>
               </div>
 
-              {/* 7. Subscriptions Widget (NEW) */}
+              {/* 7. Subscriptions Widget */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="font-semibold text-pro-white flex items-center gap-2"><CreditCard className="w-4 h-4 text-orange-500"/> Subs</h4>
@@ -518,7 +538,7 @@ export default function JournalApp() {
                 <button onClick={() => window.open('https://eduapp-chi.vercel.app/', '_blank')} className="relative z-10 w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">Launch App <ExternalLink className="w-3 h-3" /></button>
               </div>
 
-              {/* 9. Command Center (DYNAMIC) */}
+              {/* 9. Command Center (DYNAMIC & FIXED) */}
               <div className="lg:col-span-1 bg-pro-card rounded-2xl p-6 border border-pro-border shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="font-semibold text-pro-white flex items-center gap-2"><Link className="w-4 h-4 text-purple-500"/> Commands</h4>
@@ -526,8 +546,14 @@ export default function JournalApp() {
                 </div>
                 {isEditingCommands ? (
                   <div className="space-y-2 animate-fadeIn">
-                    <div className="flex gap-1"><input className="flex-1 bg-pro-bg border border-pro-border rounded px-2 py-1 text-xs text-white" placeholder="Title" value={newLink.title} onChange={e=>setNewLink({...newLink, title:e.target.value})} /><input className="flex-1 bg-pro-bg border border-pro-border rounded px-2 py-1 text-xs text-white" placeholder="URL" value={newLink.url} onChange={e=>setNewLink({...newLink, url:e.target.value})} /> <button onClick={addCommandLink} className="bg-purple-600 text-white px-2 rounded"><Plus className="w-3 h-3"/></button></div>
-                    <div className="h-32 overflow-y-auto mt-2 space-y-1">{commandLinks.map(l => (<div key={l.id} className="flex justify-between items-center text-xs p-1 bg-pro-bg rounded border border-pro-border"><span>{l.title}</span><button onClick={() => removeCommandLink(l.id)} className="text-red-400"><X className="w-3 h-3"/></button></div>))}</div>
+                    <div className="flex flex-col gap-2">
+                      <input className="w-full bg-pro-bg border border-pro-border rounded px-2 py-1 text-xs text-white" placeholder="Title" value={newLink.title} onChange={e=>setNewLink({...newLink, title:e.target.value})} />
+                      <div className="flex gap-1">
+                        <input className="flex-1 bg-pro-bg border border-pro-border rounded px-2 py-1 text-xs text-white" placeholder="URL" value={newLink.url} onChange={e=>setNewLink({...newLink, url:e.target.value})} /> 
+                        <button onClick={addCommandLink} className="bg-purple-600 text-white px-2 rounded hover:bg-purple-500 transition-colors"><Plus className="w-4 h-4"/></button>
+                      </div>
+                    </div>
+                    <div className="h-24 overflow-y-auto mt-2 space-y-1">{commandLinks.map(l => (<div key={l.id} className="flex justify-between items-center text-xs p-1 bg-pro-bg rounded border border-pro-border"><span>{l.title}</span><button onClick={() => removeCommandLink(l.id)} className="text-red-400"><X className="w-3 h-3"/></button></div>))}</div>
                   </div>
                 ) : (
                   <div className="flex-1 grid grid-cols-2 gap-2 overflow-y-auto custom-scrollbar content-start">
@@ -551,13 +577,8 @@ export default function JournalApp() {
             </div>
           )}
 
-          {/* ... (Event Modal, Security Modal, Write/Entries Views - Kept identical to previous stable version) ... */}
-          {/* I have omitted the repetitive modal/view code here to keep the response focused, 
-              but in your actual file, you MUST keep the Write, Entries, Stats, EventModal, 
-              SecurityModal, and SettingsModal JSX blocks exactly as they were in the previous working version. 
-              The changes above are strictly within the Dashboard View logic. */}
-          
-          {/* Re-inserting required Modals for completeness since I replaced the whole file content above */}
+          {/* ... Modals (Event, Security, Settings) ... */}
+          {/* Re-inserting modlas for completeness */}
           {isEventModalOpen && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
               <div className="bg-pro-card border border-pro-border rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
@@ -605,6 +626,7 @@ export default function JournalApp() {
             </div>
           )}
 
+          {/* ... Write/Entries/Stats (Standard) ... */}
           {(view === 'write' || zenMode) && (
             <div className={`relative flex flex-col h-full ${zenMode ? 'max-w-3xl mx-auto w-full' : 'bg-pro-card rounded-2xl border border-pro-border p-8 shadow-sm h-[calc(100vh-140px)]'}`}>
               <div className="absolute top-4 right-4 z-20"><button onClick={() => setZenMode(!zenMode)} className="p-2 text-gray-400 hover:text-white bg-pro-bg rounded-full border border-pro-border">{zenMode ? <Minimize2 className="w-5 h-5"/> : <Maximize2 className="w-5 h-5"/>}</button></div>
