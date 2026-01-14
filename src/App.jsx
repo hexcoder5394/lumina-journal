@@ -15,8 +15,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import Login from './Login';
 
 // --- CONFIGURATION ---
-// TODO: PASTE YOUR KEY INSIDE THE QUOTES BELOW
-const GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"; 
+const GEMINI_API_KEY = "AIzaSyBVgQJ1iNCmJepaTruUIVk_Mz4_ABvlhCE"; 
 
 // Helper for debouncing writes
 const debounce = (func, delay) => {
